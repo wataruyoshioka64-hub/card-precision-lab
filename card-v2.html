@@ -1,10 +1,10 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Card Precision Lab</title><style>
 *{box-sizing:border-box}body{background:#0c1515;color:#edf4f0;font:15px system-ui,sans-serif;margin:0 auto;max-width:1050px;padding:18px}h1{font-size:23px}h2{font-size:17px;margin:0 0 12px}.box{border:1px solid #36564d;background:#162622;border-radius:14px;padding:15px;margin:14px 0}button,select,input{font:inherit}button{background:#48cb96;color:#062318;border:0;padding:10px 14px;border-radius:8px;font-weight:700;margin:4px;cursor:pointer}button.alt{background:#344d44;color:white}button:disabled{opacity:.4}input[type=file]{max-width:100%}canvas{max-width:100%;height:auto;touch-action:none;display:block;margin:auto;background:#202c29}label{display:inline-block;margin:6px 10px 6px 0}.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px}.view{overflow:auto;background:#101b19;border-radius:8px;padding:6px}.small{font-size:12px;color:#b6c8c1;line-height:1.6}.stat{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.stat>div{background:#0b1915;padding:12px;border-radius:9px}.stat b{font-size:22px}.ok{color:#55e6a7}.warn{color:#ffb477}.err{color:#ff8b86}input[type=range]{width:180px}input[type=number]{width:74px;background:#243e34;border:1px solid #5a7d6b;border-radius:6px;padding:5px;color:white}#src{cursor:crosshair}#dst{cursor:crosshair}</style></head><body>
-<div id="tapCheck" style="position:sticky;top:0;z-index:999;background:#b92b2b;color:white;padding:10px;font-weight:bold">新URL版：読み込み確認中</div><h1>🃏 CARD PRECISION LAB <span style="font-size:12px;color:#a9c5b9">v20261112.22・印刷枠エッジ推定</span></h1>
+<div id="tapCheck" style="position:sticky;top:0;z-index:999;background:#b92b2b;color:white;padding:10px;font-weight:bold">新URL版：読み込み確認中</div><h1>🃏 CARD PRECISION LAB <span style="font-size:12px;color:#a9c5b9">v20261112.23・OpenCV実装</span></h1>
 <div id="loading" role="status" aria-live="polite" style="display:none;position:sticky;top:8px;z-index:5;background:#fff0c4;color:#4c3100;padding:14px;border-radius:10px;font-weight:800;text-align:center">
 <div style="display:flex;align-items:center;justify-content:center;gap:10px"><span id="spinner" style="display:inline-block;width:23px;height:23px;border:3px solid #b9a66e;border-top-color:#4c3100;border-radius:50%;animation:spin .8s linear infinite"></span><span id="loadingText">画像を読み込み中…</span><strong id="percent">0%</strong></div>
 <div style="height:12px;background:#d7c8a3;border-radius:8px;margin-top:10px;overflow:hidden"><div id="progressFill" style="width:0%;height:100%;background:#3c8d67;transition:width .1s"></div></div></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style><div class="box"><h2>1. 画像読み込み・遠近補正</h2><input type="file" id="file" accept="image/*"><button id="start" disabled>▶ 画像を読み込んで測定開始</button><p id="selected" class="small">画像を選ぶと開始ボタンが押せます。</p><div id="previewWrap" style="display:none;border:1px solid #4f9b7c;border-radius:12px;padding:10px;margin:10px 0"><strong>✓ 画像選択完了・プレビュー</strong><img id="preview" alt="選択したカード画像" style="display:block;max-width:100%;max-height:300px;object-fit:contain;margin:8px auto"><div id="previewStatus" class="small"></div></div>
-<p class="small">写真は外部送信しません。画像認識は端末内で行い、外部エンジンは不要です。カードの四隅を自動推定しますが、必ず位置を確認してください。左画像の青い丸をドラッグして四隅を調整できます。</p>
+<p class="small">写真は外部送信しません。画像認識は端末内で行います。OpenCV.jsのプログラムを外部から読み込み、失敗時は内蔵方式に切り替えます。カードの四隅を自動推定しますが、必ず位置を確認してください。左画像の青い丸をドラッグして四隅を調整できます。</p>
 <button id="detect" type="button" onclick="document.getElementById(&quot;tapCheck&quot;).textContent=&quot;再検出タップ受信&quot;;document.getElementById(&quot;detectInfo&quot;).textContent=&quot;再検出をタップしました。処理を開始します…&quot;;if(window.cardDetectAction){window.cardDetectAction()}else{document.getElementById(&quot;detectInfo&quot;).textContent=&quot;エラー：認識プログラムが起動していません。ページを再読み込みしてください&quot;}">四隅を再検出</button><button id="reset" type="button" class="alt" onclick="document.getElementById(&quot;tapCheck&quot;).textContent=&quot;初期化タップ受信&quot;;document.getElementById(&quot;detectInfo&quot;).textContent=&quot;初期化をタップしました…&quot;;if(window.cardResetAction){window.cardResetAction()}else{document.getElementById(&quot;detectInfo&quot;).textContent=&quot;エラー：認識プログラムが起動していません&quot;}">四隅を初期化</button><span id="resetStatus" role="status" style="display:inline-block;margin:6px;color:#ffcf41;font-weight:700"></span>
 <div class="cols"><div><h2>元画像・四隅の検出</h2><div class="view"><canvas id="src" width="320" height="300"></canvas></div></div><div><h2>遠近補正・カードのみ</h2><div class="view"><canvas id="dst" width="315" height="440"></canvas></div></div></div><div id="confidenceBox" style="margin:12px 0;padding:12px;border:1px solid #58756a;border-radius:9px"><strong>四隅の自動認識信頼度：<span id="confidenceValue">未測定</span></strong><div style="height:10px;background:#35443e;border-radius:6px;overflow:hidden;margin-top:8px"><div id="confidenceBar" style="width:0%;height:100%;background:#48cb96"></div></div><p class="small" style="margin-bottom:0">輪郭の明瞭さ・四角形の形状から推定した信頼度です。実際の正解率や測定精度を保証する数値ではありません。</p></div><p id="detectInfo" class="small">画像を選択してください。</p>
 <label><input type="checkbox" id="cornerConfirm"> 四隅がカードの実際の外周と一致することを拡大確認した</label></div>
@@ -301,6 +301,74 @@ function detectQuadColor(){
  if(corners.some(p=>p.x<minX-tolerance||p.x>maxX+tolerance||p.y<minY-tolerance||p.y>maxY+tolerance))return null;
  return corners.map(p=>({x:p.x/scale,y:p.y/scale}));
 }
+let cvReadyPromise=null;
+function loadOpenCV(){
+ if(window.cv&&typeof cv.Mat==='function')return Promise.resolve(true);
+ if(cvReadyPromise)return cvReadyPromise;
+ cvReadyPromise=new Promise(resolve=>{
+  const script=document.createElement('script');script.async=true;
+  script.src='https://docs.opencv.org/4.x/opencv.js';
+  let finished=false;
+  const done=ok=>{if(finished)return;finished=true;clearTimeout(timer);resolve(ok)};
+  const timer=setTimeout(()=>done(false),11000);
+  script.onerror=()=>done(false);
+  script.onload=()=>{
+   const poll=()=>{if(window.cv&&typeof cv.Mat==='function')done(true);else if(!finished)setTimeout(poll,150)};
+   poll();
+  };
+  document.head.appendChild(script);
+ });
+ return cvReadyPromise;
+}
+function detectQuadOpenCV(){
+ if(!window.cv||typeof cv.Mat!=='function')return null;
+ const c=document.createElement('canvas'),scale=Math.min(1,720/Math.max(image.width,image.height));
+ c.width=Math.round(image.width*scale);c.height=Math.round(image.height*scale);
+ c.getContext('2d').drawImage(image,0,0,c.width,c.height);
+ const allocated=[],own=x=>(allocated.push(x),x);
+ try{
+  const src=own(cv.imread(c)),gray=own(new cv.Mat()),blur=own(new cv.Mat()),edgesMat=own(new cv.Mat());
+  cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);
+  cv.GaussianBlur(gray,blur,new cv.Size(5,5),0);
+  cv.Canny(blur,edgesMat,45,125);
+  const kernel=own(cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(3,3)));
+  cv.morphologyEx(edgesMat,edgesMat,cv.MORPH_CLOSE,kernel);
+  const contours=own(new cv.MatVector()),hierarchy=own(new cv.Mat());
+  cv.findContours(edgesMat,contours,hierarchy,cv.RETR_LIST,cv.CHAIN_APPROX_SIMPLE);
+  const candidates=[];
+  for(let i=0;i<contours.size();i++){
+   const cnt=own(contours.get(i)),area=Math.abs(cv.contourArea(cnt));
+   if(area<c.width*c.height*.09||area>c.width*c.height*.96)continue;
+   const hull=own(new cv.Mat());cv.convexHull(cnt,hull,false,true);
+   const perimeter=cv.arcLength(hull,true);
+   for(const epsilon of [.012,.02,.035,.05]){
+    const approx=own(new cv.Mat());cv.approxPolyDP(hull,approx,perimeter*epsilon,true);
+    if(approx.rows!==4||!cv.isContourConvex(approx))continue;
+    const pts=[];for(let j=0;j<4;j++)pts.push({x:approx.intPtr(j,0)[0],y:approx.intPtr(j,0)[1]});
+    const cx=pts.reduce((a,p)=>a+p.x,0)/4,cy=pts.reduce((a,p)=>a+p.y,0)/4;
+    pts.sort((a,b)=>Math.atan2(a.y-cy,a.x-cx)-Math.atan2(b.y-cy,b.x-cx));
+    let start=0;for(let j=1;j<4;j++)if(pts[j].x+pts[j].y<pts[start].x+pts[start].y)start=j;
+    const q=[...pts.slice(start),...pts.slice(0,start)];
+    const length=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+    const width=(length(q[0],q[1])+length(q[2],q[3]))/2;
+    const height=(length(q[0],q[3])+length(q[1],q[2]))/2;
+    const ratio=height/Math.max(1,width);
+    if(ratio<.75||ratio>2.5)continue;
+    const borderDistance=Math.min(...q.map(p=>Math.min(p.x,p.y,c.width-p.x,c.height-p.y)));
+    const score=area/(c.width*c.height)*.75+Math.max(0,1-Math.abs(ratio-88/63))*.15+Math.min(1,borderDistance/12)*.1;
+    candidates.push({score,q});
+   }
+  }
+  candidates.sort((a,b)=>b.score-a.score);
+  return candidates.length?candidates[0].q.map(p=>({x:p.x/scale,y:p.y/scale})):null;
+ }catch(e){console.warn('OpenCV detector unavailable',e);return null}
+ finally{for(let i=allocated.length-1;i>=0;i--)try{allocated[i].delete()}catch(e){}}
+}
+async function detectQuadAdvanced(){
+ const available=await loadOpenCV();
+ const result=available?detectQuadOpenCV():null;
+ return {quad:result||detectQuad(),engine:result?'OpenCV輪郭検出':available?'従来方式（OpenCV候補なし）':'従来方式（OpenCV読み込み不可）'};
+}
 function detectQuad(){return detectQuadBoundary()||detectQuadEdges()||detectQuadColor()}
 function updateConfidence(){
  const out=$('confidenceValue'),bar=$('confidenceBar');
@@ -484,13 +552,13 @@ $('start').addEventListener('click',async()=>{
   const im=new Image();
   await new Promise((resolve,reject)=>{im.onload=resolve;im.onerror=()=>reject(new Error('画像を展開できません。JPEGまたはPNGをお試しください'));im.src=dataUrl});
   image=im;loading('画像サイズを調整中…',39);await nextFrame();fitSource();$('detect').disabled=false;$('reset').disabled=false;
-  loading('端末内でカードの輪郭を解析中…',40);await nextFrame();loading('カードの四隅を推定中…',43);await nextFrame();const autoQuad=detectQuad();loading('カードの外周候補を確認中…',44);await nextFrame();if(!autoQuad)throw Error('カードの外周を確実に検出できません。背景を単色にして、カード全体を撮影してください。');quad=autoQuad;initial=copy(quad);
+  loading('端末内でカードの輪郭を解析中…',40);await nextFrame();loading('カードの四隅を推定中…',43);await nextFrame();const detection=await detectQuadAdvanced();const autoQuad=detection.quad;loading('カードの外周候補を確認中…',44);await nextFrame();if(!autoQuad)throw Error('カードの外周を確実に検出できません。背景を単色にして、カード全体を撮影してください。');quad=autoQuad;initial=copy(quad);
   edges=[24,291,31,409];loading('補正画像を作成中…',45);await nextFrame();
   sourceDraw();await rectifyWithProgress();loading('測定画面を表示中…',99);await nextFrame();
   if(!ready)throw new Error('補正画像の作成に失敗しました');
   $('detect').disabled=false;$('reset').disabled=false;
   loading('読み込み完了',100);await new Promise(r=>setTimeout(r,300));
-  $('detectInfo').textContent=(autoQuad?'画像の読み込み完了。黄色い外周を検出しました（要確認）。':'画像の読み込み完了。四隅の自動認識に失敗したため、青い点を手動調整してください。')+' 緑の印刷枠も調整してください。';
+  $('detectInfo').textContent=(autoQuad?'画像の読み込み完了。四隅を推定しました（'+detection.engine+'・要確認）。':'画像の読み込み完了。四隅の自動認識に失敗したため、青い点を手動調整してください。')+' 緑の印刷枠も調整してください。';
  }catch(err){ready=false;$('detect').disabled=false;$('reset').disabled=false;loading('処理失敗：'+(err.message||'不明なエラー'),0);$('detectInfo').textContent='エラー：'+(err.message||'不明なエラー');$('selected').textContent='❌ '+(err.message||'処理に失敗しました')+'。カード全体が写った写真を使用してください。';}
  finally{loaded();processing=false;$('file').disabled=false;$('start').disabled=!selectedFile;}
 });
@@ -502,12 +570,12 @@ window.cardDetectAction=async()=>{
  await new Promise(resolve=>setTimeout(resolve,60));
  try{
   if(!image)throw Error('画像が未読込です。最初に測定開始を押してください');
-  const detected=detectQuad();
+  const detection=await detectQuadAdvanced();const detected=detection.quad;
   if(!detected)throw Error('カード外周を検出できませんでした');
   const changed=!quad||detected.some((p,i)=>Math.hypot(p.x-quad[i].x,p.y-quad[i].y)>2);
   quad=detected;initial=copy(quad);cornerVerified=false;$('cornerConfirm').checked=false;
   sourceDraw();rectify();$('reset').disabled=false;
-  $('detectInfo').textContent='再検出完了（'+id+'回目）。'+(changed?'四隅を更新しました。':'前回と同じ四隅でした。同じ写真では同じ結果になる場合があります。');
+  $('detectInfo').textContent='再検出完了（'+id+'回目・'+detection.engine+'）。'+(changed?'四隅を更新しました。':'前回と同じ四隅でした。同じ写真では同じ結果になる場合があります。');
  }catch(err){$('detectInfo').textContent='再検出エラー（'+id+'回目）：'+(err.message||String(err))}
  finally{$('detect').textContent='四隅を再検出'}
 };
