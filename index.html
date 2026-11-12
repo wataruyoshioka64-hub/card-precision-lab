@@ -4,7 +4,7 @@
 <div id="loading" role="status" aria-live="polite" style="display:none;position:sticky;top:8px;z-index:5;background:#fff0c4;color:#4c3100;padding:14px;border-radius:10px;font-weight:800;text-align:center">
 <div style="display:flex;align-items:center;justify-content:center;gap:10px"><span id="spinner" style="display:inline-block;width:23px;height:23px;border:3px solid #b9a66e;border-top-color:#4c3100;border-radius:50%;animation:spin .8s linear infinite"></span><span id="loadingText">画像を読み込み中…</span><strong id="percent">0%</strong></div>
 <div style="height:12px;background:#d7c8a3;border-radius:8px;margin-top:10px;overflow:hidden"><div id="progressFill" style="width:0%;height:100%;background:#3c8d67;transition:width .1s"></div></div></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style><div class="box"><h2>1. 画像読み込み・遠近補正</h2><input type="file" id="file" accept="image/*"><button id="start" disabled>▶ 画像を読み込んで測定開始</button><p id="selected" class="small">画像を選ぶと開始ボタンが押せます。</p><div id="previewWrap" style="display:none;border:1px solid #4f9b7c;border-radius:12px;padding:10px;margin:10px 0"><strong>✓ 画像選択完了・プレビュー</strong><img id="preview" alt="選択したカード画像" style="display:block;max-width:100%;max-height:300px;object-fit:contain;margin:8px auto"><div id="previewStatus" class="small"></div></div>
-<p class="small">写真は外部送信しません。カードの四隅を自動推定しますが、必ず位置を確認してください。左画像の青い丸をドラッグして四隅を調整できます。</p>
+<p class="small">写真は外部送信しません。認識エンジンの読み込みにはインターネット接続が必要です。カードの四隅を自動推定しますが、必ず位置を確認してください。左画像の青い丸をドラッグして四隅を調整できます。</p>
 <button id="detect" disabled>四隅を再検出</button><button id="reset" class="alt" disabled>四隅を初期化</button>
 <div class="cols"><div><h2>元画像・四隅の検出</h2><div class="view"><canvas id="src" width="320" height="300"></canvas></div></div><div><h2>遠近補正・カードのみ</h2><div class="view"><canvas id="dst" width="315" height="440"></canvas></div></div></div><p id="detectInfo" class="small">画像を選択してください。</p>
 <label><input type="checkbox" id="cornerConfirm"> 四隅がカードの実際の外周と一致することを拡大確認した</label></div>
@@ -36,16 +36,49 @@ function loaded(){$('loading').style.display='none'}
 const nextFrame=()=>new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,0)));
 
 function initQuad(){const w=image.width,h=image.height;return [{x:w*.12,y:h*.1},{x:w*.88,y:h*.1},{x:w*.88,y:h*.9},{x:w*.12,y:h*.9}]}
-function detectQuad(){// Foreground-vs-background estimate; safe fallback to adjustable corners
-let c=document.createElement('canvas'),max=420,s=Math.min(1,max/Math.max(image.width,image.height));c.width=Math.round(image.width*s);c.height=Math.round(image.height*s);let g=c.getContext('2d',{willReadFrequently:true});g.drawImage(image,0,0,c.width,c.height);let d=g.getImageData(0,0,c.width,c.height).data,w=c.width,h=c.height;
-const rgb=(x,y)=>{let k=(y*w+x)*4;return [d[k],d[k+1],d[k+2]]};const bg=[rgb(2,2),rgb(w-3,2),rgb(2,h-3),rgb(w-3,h-3)];
-const difference=(p,q)=>Math.sqrt((p[0]-q[0])**2+(p[1]-q[1])**2+(p[2]-q[2])**2);
-let pts=[];for(let y=2;y<h-2;y+=2)for(let x=2;x<w-2;x+=2){let v=rgb(x,y),z=Math.min(...bg.map(b=>difference(v,b)));if(z>65)pts.push({x:x/s,y:y/s})}
-if(pts.length<100)return null;
-let sums=[p=>p.x+p.y,p=>p.x-p.y,p=>p.x+p.y,p=>p.x-p.y],sorts=[1,-1,-1,1];let chosen=sums.map((fn,i)=>pts.reduce((best,p)=>sorts[i]*fn(p)<sorts[i]*fn(best)?p:best));
-let q=[chosen[0],chosen[1],chosen[2],chosen[3]];
-if(q.some((p,i)=>q.some((t,j)=>i!==j&&dist(p,t)<Math.min(image.width,image.height)*.12)))return null;
-return q;
+function detectQuad(){
+ // Find a four-sided physical card boundary, not merely pixels different from the background.
+ // No trustworthy quadrilateral => no measurement.
+ const c=document.createElement('canvas'),scale=Math.min(1,650/Math.max(image.width,image.height));
+ c.width=Math.max(2,Math.round(image.width*scale));c.height=Math.max(2,Math.round(image.height*scale));
+ const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(image,0,0,c.width,c.height);
+ const cv=window.cv;
+ if(!cv||!cv.Mat||!cv.imread){throw Error('カード認識エンジンを読み込めません。通信状態を確認して再試行してください。')}
+ let srcMat,gray,blur,edgesMat,contours,hierarchy,kernel;
+ try{
+  srcMat=cv.imread(c);gray=new cv.Mat();blur=new cv.Mat();edgesMat=new cv.Mat();contours=new cv.MatVector();hierarchy=new cv.Mat();
+  cv.cvtColor(srcMat,gray,cv.COLOR_RGBA2GRAY);
+  cv.GaussianBlur(gray,blur,new cv.Size(5,5),0);
+  cv.Canny(blur,edgesMat,45,135);
+  kernel=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(3,3));
+  cv.morphologyEx(edgesMat,edgesMat,cv.MORPH_CLOSE,kernel);
+  cv.findContours(edgesMat,contours,hierarchy,cv.RETR_LIST,cv.CHAIN_APPROX_SIMPLE);
+  let best=null,bestScore=-Infinity;
+  const total=c.width*c.height;
+  for(let i=0;i<contours.size();i++){
+   const contour=contours.get(i);let approx=new cv.Mat();
+   try{
+    const perimeter=cv.arcLength(contour,true),area=cv.contourArea(contour);
+    if(area<total*.08||area>total*.96)continue;
+    cv.approxPolyDP(contour,approx,.025*perimeter,true);
+    if(approx.rows!==4||!cv.isContourConvex(approx))continue;
+    let points=[];for(let j=0;j<4;j++)points.push({x:approx.intPtr(j,0)[0],y:approx.intPtr(j,0)[1]});
+    const cx=points.reduce((a,p)=>a+p.x,0)/4,cy=points.reduce((a,p)=>a+p.y,0)/4;
+    const ordered=points.slice().sort((a,b)=>Math.atan2(a.y-cy,a.x-cx)-Math.atan2(b.y-cy,b.x-cx));
+    const tl=points.reduce((a,p)=>p.x+p.y<a.x+a.y?p:a);
+    const idx=ordered.indexOf(tl),seq=[...ordered.slice(idx),...ordered.slice(0,idx)];
+    const q=seq[1].x>seq[3].x?seq:[seq[0],seq[3],seq[2],seq[1]];
+    const side=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+    const w=(side(q[0],q[1])+side(q[2],q[3]))/2,h=(side(q[1],q[2])+side(q[3],q[0]))/2;
+    const ratio=Math.max(w,h)/Math.min(w,h);
+    if(ratio<1.12||ratio>1.9)continue;
+    const centerDistance=Math.hypot(cx-c.width/2,cy-c.height/2)/Math.hypot(c.width,c.height);
+    const score=area/total*2-Math.abs(ratio-88/63)*.75-centerDistance*.5;
+    if(score>bestScore){bestScore=score;best=q.map(p=>({x:p.x/scale,y:p.y/scale}))}
+   }finally{approx.delete();contour.delete()}
+  }
+  return best;
+ }finally{for(const m of [srcMat,gray,blur,edgesMat,contours,hierarchy,kernel])if(m)m.delete()}
 }
 function sourceDraw(){if(!image)return;sc.clearRect(0,0,src.width,src.height);sc.drawImage(image,0,0,src.width,src.height);sc.lineWidth=2;sc.strokeStyle='#40a8ff';sc.beginPath();quad.forEach((p,i)=>i?sc.lineTo(p.x*srcScale,p.y*srcScale):sc.moveTo(p.x*srcScale,p.y*srcScale));sc.closePath();sc.stroke();quad.forEach((p,i)=>{sc.beginPath();sc.fillStyle='#40a8ff';sc.arc(p.x*srcScale,p.y*srcScale,7,0,Math.PI*2);sc.fill();sc.fillStyle='#fff';sc.font='bold 12px sans-serif';sc.fillText(String(i+1),p.x*srcScale+9,p.y*srcScale-8)})}
 function solve(A,b){for(let k=0;k<b.length;k++){let pivot=k;for(let i=k+1;i<b.length;i++)if(Math.abs(A[i][k])>Math.abs(A[pivot][k]))pivot=i;[A[k],A[pivot]]=[A[pivot],A[k]];[b[k],b[pivot]]=[b[pivot],b[k]];if(Math.abs(A[k][k])<1e-10)return null;let z=A[k][k];for(let j=k;j<b.length;j++)A[k][j]/=z;b[k]/=z;for(let i=0;i<b.length;i++){if(i===k)continue;let f=A[i][k];for(let j=k;j<b.length;j++)A[i][j]-=f*A[k][j];b[i]-=f*b[k]}}return b}
@@ -130,7 +163,7 @@ $('start').addEventListener('click',async()=>{
   const im=new Image();
   await new Promise((resolve,reject)=>{im.onload=resolve;im.onerror=()=>reject(new Error('画像を展開できません。JPEGまたはPNGをお試しください'));im.src=dataUrl});
   image=im;loading('画像サイズを調整中…',39);await nextFrame();fitSource();
-  loading('カードの四隅を推定中…',43);await nextFrame();const autoQuad=detectQuad();quad=autoQuad||initQuad();initial=copy(quad);
+  loading('カードの四隅を推定中…',43);await nextFrame();const autoQuad=detectQuad();if(!autoQuad)throw Error('カードの外周を確実に検出できません。背景を単色にして、カード全体を撮影してください。');quad=autoQuad;initial=copy(quad);
   edges=[24,291,31,409];loading('補正画像を作成中…',45);await nextFrame();
   sourceDraw();await rectifyWithProgress();loading('測定画面を表示中…',99);await nextFrame();
   if(!ready)throw new Error('補正画像の作成に失敗しました');
@@ -140,10 +173,10 @@ $('start').addEventListener('click',async()=>{
  }catch(err){ready=false;$('detectInfo').textContent='エラー：'+(err.message||'不明なエラー');$('selected').textContent='❌ '+(err.message||'処理に失敗しました')+'。別のJPEG/PNGを試してください。';}
  finally{loaded();processing=false;$('file').disabled=false;$('start').disabled=!selectedFile;}
 });
-$('detect').onclick=()=>{cornerVerified=false;$('cornerConfirm').checked=false;quad=detectQuad()||initQuad();sourceDraw();rectify()};$('reset').onclick=()=>{cornerVerified=false;$('cornerConfirm').checked=false;quad=copy(initial);sourceDraw();rectify()};
+$('detect').onclick=()=>{cornerVerified=false;$('cornerConfirm').checked=false;try{const detected=detectQuad();if(!detected)throw Error('カードの外周を検出できません');quad=detected;initial=copy(quad);sourceDraw();rectify();$('detectInfo').textContent='カードの輪郭を再検出しました'}catch(e){$('detectInfo').textContent='再検出失敗：'+e.message}};$('reset').onclick=()=>{cornerVerified=false;$('cornerConfirm').checked=false;quad=copy(initial);sourceDraw();rectify();$('detectInfo').textContent='最後に検出したカードの四隅に戻しました'};
 $('cornerConfirm').addEventListener('change',e=>{cornerVerified=e.target.checked;render()});
 $('borderConfirm').addEventListener('change',e=>{borderVerified=e.target.checked;render()});
 ['side','guides','rulers'].forEach(id=>$(id).addEventListener('change',render));
 $('export').onclick=()=>{if(!ready)return;let a=document.createElement('a');a.download='card-centering-overlay.png';a.href=meas.toDataURL('image/png');a.click()};
 $('report').onclick=()=>{if(!values)return;let v=values,rows=[['side','rank','left_right_major_percent','top_bottom_major_percent','left_mm','right_mm','top_mm','bottom_mm','offset_x_mm','offset_y_mm','offset_distance_mm'],[$('side').value,v.rank,v.lr.toFixed(2),v.tb.toFixed(2),...( [v.left*63/W,v.right*63/W,v.top*88/H,v.bottom*88/H,v.dx,v.dy,v.offset].map(n=>n.toFixed(3)))]];let blob=new Blob([rows.map(r=>r.join(',')).join('\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='centering-measurements.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
-</script></body></html>
+</script><script async src="https://docs.opencv.org/4.x/opencv.js"></script></body></html>
