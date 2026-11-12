@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Card Precision Lab</title><style>
 *{box-sizing:border-box}body{background:#0c1515;color:#edf4f0;font:15px system-ui,sans-serif;margin:0 auto;max-width:1050px;padding:18px}h1{font-size:23px}h2{font-size:17px;margin:0 0 12px}.box{border:1px solid #36564d;background:#162622;border-radius:14px;padding:15px;margin:14px 0}button,select,input{font:inherit}button{background:#48cb96;color:#062318;border:0;padding:10px 14px;border-radius:8px;font-weight:700;margin:4px;cursor:pointer}button.alt{background:#344d44;color:white}button:disabled{opacity:.4}input[type=file]{max-width:100%}canvas{max-width:100%;height:auto;touch-action:none;display:block;margin:auto;background:#202c29}label{display:inline-block;margin:6px 10px 6px 0}.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px}.view{overflow:auto;background:#101b19;border-radius:8px;padding:6px}.small{font-size:12px;color:#b6c8c1;line-height:1.6}.stat{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.stat>div{background:#0b1915;padding:12px;border-radius:9px}.stat b{font-size:22px}.ok{color:#55e6a7}.warn{color:#ffb477}.err{color:#ff8b86}input[type=range]{width:180px}input[type=number]{width:74px;background:#243e34;border:1px solid #5a7d6b;border-radius:6px;padding:5px;color:white}#src{cursor:crosshair}#dst{cursor:crosshair}</style></head><body>
-<h1>🃏 CARD PRECISION LAB <span style="font-size:12px;color:#a9c5b9">v20261112.15・初期化状態表示</span></h1>
+<h1>🃏 CARD PRECISION LAB <span style="font-size:12px;color:#a9c5b9">v20261112.17・背景差分フォールバック</span></h1>
 <div id="loading" role="status" aria-live="polite" style="display:none;position:sticky;top:8px;z-index:5;background:#fff0c4;color:#4c3100;padding:14px;border-radius:10px;font-weight:800;text-align:center">
 <div style="display:flex;align-items:center;justify-content:center;gap:10px"><span id="spinner" style="display:inline-block;width:23px;height:23px;border:3px solid #b9a66e;border-top-color:#4c3100;border-radius:50%;animation:spin .8s linear infinite"></span><span id="loadingText">画像を読み込み中…</span><strong id="percent">0%</strong></div>
 <div style="height:12px;background:#d7c8a3;border-radius:8px;margin-top:10px;overflow:hidden"><div id="progressFill" style="width:0%;height:100%;background:#3c8d67;transition:width .1s"></div></div></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style><div class="box"><h2>1. 画像読み込み・遠近補正</h2><input type="file" id="file" accept="image/*"><button id="start" disabled>▶ 画像を読み込んで測定開始</button><p id="selected" class="small">画像を選ぶと開始ボタンが押せます。</p><div id="previewWrap" style="display:none;border:1px solid #4f9b7c;border-radius:12px;padding:10px;margin:10px 0"><strong>✓ 画像選択完了・プレビュー</strong><img id="preview" alt="選択したカード画像" style="display:block;max-width:100%;max-height:300px;object-fit:contain;margin:8px auto"><div id="previewStatus" class="small"></div></div>
@@ -52,6 +52,21 @@ function detectQuad(){
   const sat=mx===0?0:delta/mx;
   if(hue>=24&&hue<=84&&sat>=.17&&mx>=.25)yellow[i]=1;
  }
+ // Fallback for card fronts: distinguish card from the background at photo corners.
+ const bg=[];const patch=Math.max(2,Math.round(Math.min(w,h)*.035));
+ for(const [cx,cy] of [[0,0],[w-patch,0],[0,h-patch],[w-patch,h-patch]]){
+  let sr=0,sg=0,sb=0,ct=0;
+  for(let yy=cy;yy<cy+patch;yy++)for(let xx=cx;xx<cx+patch;xx++){const k=(yy*w+xx)*4;sr+=data[k];sg+=data[k+1];sb+=data[k+2];ct++}
+  bg.push([sr/ct,sg/ct,sb/ct]);
+ }
+ const foreground=new Uint8Array(n);
+ for(let i=0;i<n;i++){
+  const k=i*4;let closest=Infinity;
+  for(const b of bg){const dr=data[k]-b[0],dg=data[k+1]-b[1],db=data[k+2]-b[2];closest=Math.min(closest,Math.sqrt(dr*dr+dg*dg+db*db))}
+  if(closest>43)foreground[i]=1;
+ }
+ const yellowCount=yellow.reduce((a,b)=>a+b,0);
+ const segmentation=yellowCount<n*.012?foreground:yellow;
  // Dilate and erode to connect the yellow border across minor glare.
  function morph(src,dilate,radius){
   // Integral-image box morphology: constant work per pixel rather than 81 neighbor checks.
@@ -61,11 +76,11 @@ function detectQuad(){
   for(let y=0;y<h;y++)for(let x=0;x<w;x++){
    const x0=Math.max(0,x-radius),x1=Math.min(w,x+radius+1),y0=Math.max(0,y-radius),y1=Math.min(h,y+radius+1);
    const sum=integral[y1*stride+x1]-integral[y0*stride+x1]-integral[y1*stride+x0]+integral[y0*stride+x0];
-   dst[y*w+x]=dilate?(sum>0?1:0):(sum===(2*radius+1)**2?1:0);
+   dst[y*w+x]=dilate?(sum>0?1:0):(sum===(x1-x0)*(y1-y0)?1:0);
   }
   return dst;
  }
- const closed=morph(morph(yellow,true,4),false,4);
+ const closed=morph(morph(segmentation,true,3),false,3);
  const seen=new Uint8Array(n),queue=new Int32Array(n);let best=null,bestCount=0,bestPixels=null;
  for(let seed=0;seed<n;seed++){
   if(!closed[seed]||seen[seed])continue;
