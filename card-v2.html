@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Card Precision Lab</title><style>
 *{box-sizing:border-box}body{background:#0c1515;color:#edf4f0;font:15px system-ui,sans-serif;margin:0 auto;max-width:1050px;padding:18px}h1{font-size:23px}h2{font-size:17px;margin:0 0 12px}.box{border:1px solid #36564d;background:#162622;border-radius:14px;padding:15px;margin:14px 0}button,select,input{font:inherit}button{background:#48cb96;color:#062318;border:0;padding:10px 14px;border-radius:8px;font-weight:700;margin:4px;cursor:pointer}button.alt{background:#344d44;color:white}button:disabled{opacity:.4}input[type=file]{max-width:100%}canvas{max-width:100%;height:auto;touch-action:none;display:block;margin:auto;background:#202c29}label{display:inline-block;margin:6px 10px 6px 0}.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px}.view{overflow:auto;background:#101b19;border-radius:8px;padding:6px}.small{font-size:12px;color:#b6c8c1;line-height:1.6}.stat{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.stat>div{background:#0b1915;padding:12px;border-radius:9px}.stat b{font-size:22px}.ok{color:#55e6a7}.warn{color:#ffb477}.err{color:#ff8b86}input[type=range]{width:180px}input[type=number]{width:74px;background:#243e34;border:1px solid #5a7d6b;border-radius:6px;padding:5px;color:white}#src{cursor:crosshair}#dst{cursor:crosshair}</style></head><body>
-<div id="tapCheck" style="position:sticky;top:0;z-index:999;background:#b92b2b;color:white;padding:10px;font-weight:bold">新URL版：読み込み確認中</div><h1>🃏 CARD PRECISION LAB <span style="font-size:12px;color:#a9c5b9">v20261112.20・完全初期化</span></h1>
+<div id="tapCheck" style="position:sticky;top:0;z-index:999;background:#b92b2b;color:white;padding:10px;font-weight:bold">新URL版：読み込み確認中</div><h1>🃏 CARD PRECISION LAB <span style="font-size:12px;color:#a9c5b9">v20261112.21・外周輪郭優先</span></h1>
 <div id="loading" role="status" aria-live="polite" style="display:none;position:sticky;top:8px;z-index:5;background:#fff0c4;color:#4c3100;padding:14px;border-radius:10px;font-weight:800;text-align:center">
 <div style="display:flex;align-items:center;justify-content:center;gap:10px"><span id="spinner" style="display:inline-block;width:23px;height:23px;border:3px solid #b9a66e;border-top-color:#4c3100;border-radius:50%;animation:spin .8s linear infinite"></span><span id="loadingText">画像を読み込み中…</span><strong id="percent">0%</strong></div>
 <div style="height:12px;background:#d7c8a3;border-radius:8px;margin-top:10px;overflow:hidden"><div id="progressFill" style="width:0%;height:100%;background:#3c8d67;transition:width .1s"></div></div></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style><div class="box"><h2>1. 画像読み込み・遠近補正</h2><input type="file" id="file" accept="image/*"><button id="start" disabled>▶ 画像を読み込んで測定開始</button><p id="selected" class="small">画像を選ぶと開始ボタンが押せます。</p><div id="previewWrap" style="display:none;border:1px solid #4f9b7c;border-radius:12px;padding:10px;margin:10px 0"><strong>✓ 画像選択完了・プレビュー</strong><img id="preview" alt="選択したカード画像" style="display:block;max-width:100%;max-height:300px;object-fit:contain;margin:8px auto"><div id="previewStatus" class="small"></div></div>
@@ -37,6 +37,77 @@ function loaded(){$('loading').style.display='none'}
 const nextFrame=()=>new Promise(resolve=>setTimeout(resolve,20));
 
 function initQuad(){const w=image.width,h=image.height;return [{x:w*.12,y:h*.1},{x:w*.88,y:h*.1},{x:w*.88,y:h*.9},{x:w*.12,y:h*.9}]}
+function detectQuadBoundary(){
+ // Background contrast at all four corners, then robustly fit card silhouette edges.
+ const c=document.createElement('canvas'),scale=Math.min(1,540/Math.max(image.width,image.height));
+ c.width=Math.max(20,Math.round(image.width*scale));c.height=Math.max(20,Math.round(image.height*scale));
+ const g=c.getContext('2d',{willReadFrequently:true});g.drawImage(image,0,0,c.width,c.height);
+ const w=c.width,h=c.height,p=g.getImageData(0,0,w,h).data;
+ const samples=[],patch=Math.max(3,Math.round(Math.min(w,h)*.035));
+ for(const [cx,cy] of [[0,0],[w-patch,0],[0,h-patch],[w-patch,h-patch]]){
+  let r=0,gg=0,b=0,n=0;
+  for(let y=cy;y<cy+patch;y++)for(let x=cx;x<cx+patch;x++){const k=(y*w+x)*4;r+=p[k];gg+=p[k+1];b+=p[k+2];n++}
+  samples.push([r/n,gg/n,b/n]);
+ }
+ const bg=samples.reduce((best,a)=>{const count=samples.filter(b=>Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2])<40).length;return count>best.count?{color:a,count}:best},{count:0}).color;
+ const mask=new Uint8Array(w*h);
+ for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){
+  const i=y*w+x,k=i*4,dist=Math.hypot(p[k]-bg[0],p[k+1]-bg[1],p[k+2]-bg[2]);
+  if(dist>45)mask[i]=1;
+ }
+ // Close short breaks without erasing the physical border.
+ const dil=new Uint8Array(w*h);
+ for(let y=2;y<h-2;y++)for(let x=2;x<w-2;x++){
+  const i=y*w+x;if(mask[i]||mask[i-1]||mask[i+1]||mask[i-w]||mask[i+w])dil[i]=1;
+ }
+ const seen=new Uint8Array(w*h),queue=new Int32Array(w*h);
+ let best=null,bestSize=0;
+ for(let seed=0;seed<w*h;seed++){
+  if(!dil[seed]||seen[seed])continue;
+  let head=0,tail=1;queue[0]=seed;seen[seed]=1;
+  let minX=w,minY=h,maxX=0,maxY=0;
+  while(head<tail){
+   const i=queue[head++],x=i%w,y=(i-x)/w;
+   minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);
+   for(const j of [i-1,i+1,i-w,i+w]){
+    if(j<0||j>=w*h||Math.abs(j%w-x)+Math.abs(Math.floor(j/w)-y)!==1||seen[j]||!dil[j])continue;
+    seen[j]=1;queue[tail++]=j;
+   }
+  }
+  const area=(maxX-minX)*(maxY-minY);
+  if(tail>bestSize&&area>w*h*.11&&area<w*h*.94){bestSize=tail;best=queue.slice(0,tail)}
+ }
+ if(!best)return null;
+ const rowMin=new Int32Array(h).fill(w),rowMax=new Int32Array(h).fill(-1),colMin=new Int32Array(w).fill(h),colMax=new Int32Array(w).fill(-1);
+ for(const i of best){const x=i%w,y=(i-x)/w;rowMin[y]=Math.min(rowMin[y],x);rowMax[y]=Math.max(rowMax[y],x);colMin[x]=Math.min(colMin[x],y);colMax[x]=Math.max(colMax[x],y)}
+ const xs=[],ys=[];for(let y=0;y<h;y++)if(rowMax[y]>=0)ys.push(y);for(let x=0;x<w;x++)if(colMax[x]>=0)xs.push(x);
+ if(xs.length<35||ys.length<45)return null;
+ const minX=xs[0],maxX=xs[xs.length-1],minY=ys[0],maxY=ys[ys.length-1];
+ function fit(points){
+  if(points.length<15)return null;
+  let selected=points;
+  for(let z=0;z<3;z++){
+   let sx=0,sy=0,sxx=0,sxy=0;
+   for(const a of selected){sx+=a[0];sy+=a[1];sxx+=a[0]*a[0];sxy+=a[0]*a[1]}
+   const n=selected.length,den=n*sxx-sx*sx;if(Math.abs(den)<1e-7)return null;
+   const m=(n*sxy-sx*sy)/den,b=(sy-m*sx)/n;
+   if(z===2)return{m,b};
+   const residual=selected.map(a=>Math.abs(a[1]-m*a[0]-b)).sort((a,b)=>a-b),cut=Math.max(2,residual[Math.floor(residual.length*.65)]*1.5);
+   selected=selected.filter(a=>Math.abs(a[1]-m*a[0]-b)<=cut);if(selected.length<12)return null;
+  }
+ }
+ const left=[],right=[],top=[],bottom=[];
+ for(let y=Math.ceil(minY+(maxY-minY)*.2);y<minY+(maxY-minY)*.8;y++)if(rowMax[y]-rowMin[y]>(maxX-minX)*.6){left.push([y,rowMin[y]]);right.push([y,rowMax[y]])}
+ for(let x=Math.ceil(minX+(maxX-minX)*.2);x<minX+(maxX-minX)*.8;x++)if(colMax[x]-colMin[x]>(maxY-minY)*.6){top.push([x,colMin[x]]);bottom.push([x,colMax[x]])}
+ const L=fit(left),R=fit(right),T=fit(top),B=fit(bottom);
+ if(!L||!R||!T||!B)return null;
+ const intersect=(side,cap)=>{const d=1-side.m*cap.m;if(Math.abs(d)<.2)return null;const x=(side.m*cap.b+side.b)/d;return{x,y:cap.m*x+cap.b}};
+ const q=[intersect(L,T),intersect(R,T),intersect(R,B),intersect(L,B)];
+ if(q.some(p=>!p||!Number.isFinite(p.x)||!Number.isFinite(p.y)||p.x<0||p.y<0||p.x>w||p.y>h))return null;
+ const area=Math.abs(q.reduce((a,p,i)=>a+p.x*q[(i+1)%4].y-q[(i+1)%4].x*p.y,0))/2;
+ if(area<w*h*.1)return null;
+ return q.map(p=>({x:p.x/scale,y:p.y/scale}));
+}
 function detectQuadEdges(){
  // Grayscale gradient + weighted Hough lines; no dependence on card color.
  const c=document.createElement('canvas'),scale=Math.min(1,420/Math.max(image.width,image.height));
@@ -230,7 +301,7 @@ function detectQuadColor(){
  if(corners.some(p=>p.x<minX-tolerance||p.x>maxX+tolerance||p.y<minY-tolerance||p.y>maxY+tolerance))return null;
  return corners.map(p=>({x:p.x/scale,y:p.y/scale}));
 }
-function detectQuad(){return detectQuadEdges()||detectQuadColor()}
+function detectQuad(){return detectQuadBoundary()||detectQuadEdges()||detectQuadColor()}
 function updateConfidence(){
  const out=$('confidenceValue'),bar=$('confidenceBar');
  if(!quad||!image){out.textContent='未測定';bar.style.width='0%';return}
@@ -318,7 +389,7 @@ async function rectifyWithProgress(){
   }
   if(y%40===39){loading('カードを正面に補正中…',45+Math.floor((y+1)/H*53));await nextFrame()}
  }
- dc.putImageData(out,0,0);ready=true;render();
+ dc.putImageData(out,0,0);ready=true;const detectedInner=estimateInnerBorder();innerEstimated=!!detectedInner;if(detectedInner)edges=detectedInner;render();sourceDraw();
 }
 
 function line(x1,y1,x2,y2,color,width=1,dash=[]){mc.beginPath();mc.strokeStyle=color;mc.lineWidth=width;mc.setLineDash(dash);mc.moveTo(x1,y1);mc.lineTo(x2,y2);mc.stroke();mc.setLineDash([])}
