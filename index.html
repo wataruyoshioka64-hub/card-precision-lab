@@ -4,7 +4,7 @@
 <div id="loading" role="status" aria-live="polite" style="display:none;position:sticky;top:8px;z-index:5;background:#fff0c4;color:#4c3100;padding:14px;border-radius:10px;font-weight:800;text-align:center">
 <div style="display:flex;align-items:center;justify-content:center;gap:10px"><span id="spinner" style="display:inline-block;width:23px;height:23px;border:3px solid #b9a66e;border-top-color:#4c3100;border-radius:50%;animation:spin .8s linear infinite"></span><span id="loadingText">画像を読み込み中…</span><strong id="percent">0%</strong></div>
 <div style="height:12px;background:#d7c8a3;border-radius:8px;margin-top:10px;overflow:hidden"><div id="progressFill" style="width:0%;height:100%;background:#3c8d67;transition:width .1s"></div></div></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style><div class="box"><h2>1. 画像読み込み・遠近補正</h2><input type="file" id="file" accept="image/*"><button id="start" disabled>▶ 画像を読み込んで測定開始</button><p id="selected" class="small">画像を選ぶと開始ボタンが押せます。</p><div id="previewWrap" style="display:none;border:1px solid #4f9b7c;border-radius:12px;padding:10px;margin:10px 0"><strong>✓ 画像選択完了・プレビュー</strong><img id="preview" alt="選択したカード画像" style="display:block;max-width:100%;max-height:300px;object-fit:contain;margin:8px auto"><div id="previewStatus" class="small"></div></div>
-<p class="small">写真は外部送信しません。認識エンジンの読み込みにはインターネット接続が必要です。カードの四隅を自動推定しますが、必ず位置を確認してください。左画像の青い丸をドラッグして四隅を調整できます。</p>
+<p class="small">写真は外部送信しません。画像認識は端末内で行い、外部エンジンは不要です。カードの四隅を自動推定しますが、必ず位置を確認してください。左画像の青い丸をドラッグして四隅を調整できます。</p>
 <button id="detect" disabled>四隅を再検出</button><button id="reset" class="alt" disabled>四隅を初期化</button>
 <div class="cols"><div><h2>元画像・四隅の検出</h2><div class="view"><canvas id="src" width="320" height="300"></canvas></div></div><div><h2>遠近補正・カードのみ</h2><div class="view"><canvas id="dst" width="315" height="440"></canvas></div></div></div><p id="detectInfo" class="small">画像を選択してください。</p>
 <label><input type="checkbox" id="cornerConfirm"> 四隅がカードの実際の外周と一致することを拡大確認した</label></div>
@@ -36,69 +36,64 @@ function loaded(){$('loading').style.display='none'}
 const nextFrame=()=>new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,0)));
 
 function initQuad(){const w=image.width,h=image.height;return [{x:w*.12,y:h*.1},{x:w*.88,y:h*.1},{x:w*.88,y:h*.9},{x:w*.12,y:h*.9}]}
-let cvLoadPromise=null;
-function cvReady(){return !!(window.cv&&typeof window.cv.Mat==='function'&&typeof window.cv.imread==='function')}
-function loadCvScript(url,timeout=18000){return new Promise((resolve,reject)=>{
- const el=document.createElement('script');let done=false;
- const timer=setTimeout(()=>finish(new Error('認識エンジンの通信がタイムアウトしました')),timeout);
- function finish(err){if(done)return;done=true;clearTimeout(timer);if(err){el.remove();reject(err)}else resolve()}
- el.onload=async()=>{try{
-   if(window.cv&&typeof window.cv.then==='function')window.cv=await window.cv;
-   if(cvReady())return finish();
-   if(window.cv&&typeof window.cv.onRuntimeInitialized!=='undefined')window.cv.onRuntimeInitialized=()=>finish();
-   const start=Date.now();const poll=setInterval(()=>{if(done){clearInterval(poll);return}if(cvReady()){clearInterval(poll);finish()}else if(Date.now()-start>12000){clearInterval(poll);finish(new Error('認識エンジンの初期化に失敗'))}},100);
-  }catch(e){finish(e)}};
- el.onerror=()=>finish(new Error('認識エンジンの配信元に接続できません'));
- el.src=url;document.head.appendChild(el);
-})}
-async function ensureCv(){
- if(cvReady())return;
- if(!cvLoadPromise)cvLoadPromise=(async()=>{
-  let last;
-  for(const url of ['https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js','https://docs.opencv.org/4.x/opencv.js']){
-   try{await loadCvScript(url);if(cvReady())return}catch(e){last=e}
-  }
-  throw last||Error('認識エンジンを読み込めません');
- })();
- try{await cvLoadPromise}catch(e){cvLoadPromise=null;throw e}
-}
 function detectQuad(){
- // HSV yellow card rim segmentation, matching the photographed Pokemon card back.
- // This is a targeted detection strategy, not a universal card detector.
- const c=document.createElement('canvas'),scale=Math.min(1,850/Math.max(image.width,image.height));
- c.width=Math.round(image.width*scale);c.height=Math.round(image.height*scale);
+ // Local-only pixel segmentation. No external OpenCV script or network required.
+ // Optimized for the yellow outer border of a Pokemon card back.
+ const c=document.createElement('canvas'),scale=Math.min(1,600/Math.max(image.width,image.height));
+ c.width=Math.max(2,Math.round(image.width*scale));c.height=Math.max(2,Math.round(image.height*scale));
  const g=c.getContext('2d',{willReadFrequently:true});g.drawImage(image,0,0,c.width,c.height);
- const cv=window.cv;if(!cv||!cv.Mat||!cv.imread)throw Error('OpenCV認識エンジンが未読込です。ページを再読込してください。');
- let rgba,hsv,mask,kernel,contours,hierarchy;
- try{
-  rgba=cv.imread(c);hsv=new cv.Mat();mask=new cv.Mat();contours=new cv.MatVector();hierarchy=new cv.Mat();
-  cv.cvtColor(rgba,hsv,cv.COLOR_RGBA2RGB);let rgb=hsv;hsv=new cv.Mat();cv.cvtColor(rgb,hsv,cv.COLOR_RGB2HSV);rgb.delete();
-  const lo=new cv.Mat(hsv.rows,hsv.cols,hsv.type(),[12,45,65,0]),hi=new cv.Mat(hsv.rows,hsv.cols,hsv.type(),[42,255,255,255]);
-  cv.inRange(hsv,lo,hi,mask);lo.delete();hi.delete();
-  kernel=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(17,17));cv.morphologyEx(mask,mask,cv.MORPH_CLOSE,kernel);
-  cv.findContours(mask,contours,hierarchy,cv.RETR_EXTERNAL,cv.CHAIN_APPROX_SIMPLE);
-  let best=null,area=0;
-  for(let i=0;i<contours.size();i++){
-   let contour=contours.get(i),hull=new cv.Mat();
-   try{
-    const a=cv.contourArea(contour);if(a<area||a<c.width*c.height*.1)continue;
-    cv.convexHull(contour,hull,false,true);
-    const pts=[];for(let j=0;j<hull.rows;j++){const v=hull.intPtr(j,0);pts.push({x:v[0],y:v[1]})}
-    if(pts.length<4)continue;
-    const tl=pts.reduce((p,q)=>q.x+q.y<p.x+p.y?q:p);
-    const br=pts.reduce((p,q)=>q.x+q.y>p.x+p.y?q:p);
-    const tr=pts.reduce((p,q)=>q.x-q.y>p.x-p.y?q:p);
-    const bl=pts.reduce((p,q)=>q.x-q.y<p.x-p.y?q:p);
-    const q=[tl,tr,br,bl];
-    const side=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
-    const width=(side(tl,tr)+side(bl,br))/2,height=(side(tl,bl)+side(tr,br))/2;
-    const ratio=height/width;
-    if(ratio<1.05||ratio>2.05||Math.min(...q.map((p,i)=>side(p,q[(i+1)%4])))<c.width*.2)continue;
-    best=q.map(p=>({x:p.x/scale,y:p.y/scale}));area=a;
-   }finally{hull.delete();contour.delete()}
+ const w=c.width,h=c.height,data=g.getImageData(0,0,w,h).data,n=w*h;
+ const yellow=new Uint8Array(n);
+ for(let i=0;i<n;i++){
+  const k=i*4,r=data[k]/255,gg=data[k+1]/255,bb=data[k+2]/255;
+  const mx=Math.max(r,gg,bb),mn=Math.min(r,gg,bb),delta=mx-mn;
+  let hue=0;if(delta){if(mx===r)hue=60*((gg-bb)/delta%6);else if(mx===gg)hue=60*((bb-r)/delta+2);else hue=60*((r-gg)/delta+4)}
+  if(hue<0)hue+=360;
+  const sat=mx===0?0:delta/mx;
+  if(hue>=24&&hue<=84&&sat>=.17&&mx>=.25)yellow[i]=1;
+ }
+ // Dilate and erode to connect the yellow border across minor glare.
+ function morph(src,dilate,radius){
+  const dst=new Uint8Array(n);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+   let match=dilate?0:1;
+   for(let dy=-radius;dy<=radius;dy++)for(let dx=-radius;dx<=radius;dx++){
+    const xx=x+dx,yy=y+dy,v=(xx>=0&&xx<w&&yy>=0&&yy<h)?src[yy*w+xx]:0;
+    if(dilate&&v){match=1;break}
+    if(!dilate&&!v){match=0;break}
+   }
+   dst[y*w+x]=match;
   }
-  return best;
- }finally{for(const x of [rgba,hsv,mask,kernel,contours,hierarchy])if(x)x.delete()}
+  return dst;
+ }
+ const closed=morph(morph(yellow,true,4),false,4);
+ const seen=new Uint8Array(n),queue=new Int32Array(n);let best=null,bestCount=0;
+ for(let seed=0;seed<n;seed++){
+  if(!closed[seed]||seen[seed])continue;
+  let head=0,tail=1;queue[0]=seed;seen[seed]=1;
+  let tl=null,tr=null,br=null,bl=null,count=0,minX=w,minY=h,maxX=0,maxY=0;
+  while(head<tail){
+   const i=queue[head++],x=i%w,y=(i-x)/w;count++;
+   if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;
+   const p={x,y};
+   if(!tl||x+y<tl.x+tl.y)tl=p;
+   if(!br||x+y>br.x+br.y)br=p;
+   if(!tr||x-y>tr.x-tr.y)tr=p;
+   if(!bl||x-y<bl.x-bl.y)bl=p;
+   const near=[i-1,i+1,i-w,i+w];
+   for(let j=0;j<4;j++){
+    const v=near[j];if(v<0||v>=n||(j===0&&x===0)||(j===1&&x===w-1)||seen[v]||!closed[v])continue;
+    seen[v]=1;queue[tail++]=v;
+   }
+  }
+  if(count<Math.max(300,n*.002)||maxX-minX<w*.23||maxY-minY<h*.3)continue;
+  const q=[tl,tr,br,bl],distance=(p,t)=>Math.hypot(p.x-t.x,p.y-t.y);
+  if(q.some((p,i)=>distance(p,q[(i+1)%4])<Math.min(w,h)*.18))continue;
+  const qw=(distance(tl,tr)+distance(bl,br))/2,qh=(distance(tl,bl)+distance(tr,br))/2,ratio=qh/qw;
+  if(ratio<1.08||ratio>2.05)continue;
+  if(count>bestCount){bestCount=count;best=q.map(p=>({x:p.x/scale,y:p.y/scale}))}
+ }
+ return best;
 }
 function sourceDraw(){if(!image)return;sc.clearRect(0,0,src.width,src.height);sc.drawImage(image,0,0,src.width,src.height);sc.lineWidth=2;sc.strokeStyle='#40a8ff';sc.beginPath();quad.forEach((p,i)=>i?sc.lineTo(p.x*srcScale,p.y*srcScale):sc.moveTo(p.x*srcScale,p.y*srcScale));sc.closePath();sc.stroke();quad.forEach((p,i)=>{sc.beginPath();sc.fillStyle='#40a8ff';sc.arc(p.x*srcScale,p.y*srcScale,7,0,Math.PI*2);sc.fill();sc.fillStyle='#fff';sc.font='bold 12px sans-serif';sc.fillText(String(i+1),p.x*srcScale+9,p.y*srcScale-8)})}
 function solve(A,b){for(let k=0;k<b.length;k++){let pivot=k;for(let i=k+1;i<b.length;i++)if(Math.abs(A[i][k])>Math.abs(A[pivot][k]))pivot=i;[A[k],A[pivot]]=[A[pivot],A[k]];[b[k],b[pivot]]=[b[pivot],b[k]];if(Math.abs(A[k][k])<1e-10)return null;let z=A[k][k];for(let j=k;j<b.length;j++)A[k][j]/=z;b[k]/=z;for(let i=0;i<b.length;i++){if(i===k)continue;let f=A[i][k];for(let j=k;j<b.length;j++)A[i][j]-=f*A[k][j];b[i]-=f*b[k]}}return b}
@@ -183,17 +178,17 @@ $('start').addEventListener('click',async()=>{
   const im=new Image();
   await new Promise((resolve,reject)=>{im.onload=resolve;im.onerror=()=>reject(new Error('画像を展開できません。JPEGまたはPNGをお試しください'));im.src=dataUrl});
   image=im;loading('画像サイズを調整中…',39);await nextFrame();fitSource();
-  loading('認識エンジンを準備中…',40);await nextFrame();await ensureCv();loading('カードの四隅を推定中…',43);await nextFrame();const autoQuad=detectQuad();if(!autoQuad)throw Error('カードの外周を確実に検出できません。背景を単色にして、カード全体を撮影してください。');quad=autoQuad;initial=copy(quad);
+  loading('端末内でカードの輪郭を解析中…',40);await nextFrame();loading('カードの四隅を推定中…',43);await nextFrame();const autoQuad=detectQuad();if(!autoQuad)throw Error('カードの外周を確実に検出できません。背景を単色にして、カード全体を撮影してください。');quad=autoQuad;initial=copy(quad);
   edges=[24,291,31,409];loading('補正画像を作成中…',45);await nextFrame();
   sourceDraw();await rectifyWithProgress();loading('測定画面を表示中…',99);await nextFrame();
   if(!ready)throw new Error('補正画像の作成に失敗しました');
   $('detect').disabled=false;$('reset').disabled=false;
   loading('読み込み完了',100);await new Promise(r=>setTimeout(r,300));
   $('detectInfo').textContent=(autoQuad?'画像の読み込み完了。黄色い外周を検出しました（要確認）。':'画像の読み込み完了。四隅の自動認識に失敗したため、青い点を手動調整してください。')+' 緑の印刷枠も調整してください。';
- }catch(err){ready=false;$('detectInfo').textContent='エラー：'+(err.message||'不明なエラー');$('selected').textContent='❌ '+(err.message||'処理に失敗しました')+'。認識エンジンの通信エラーの場合は接続状態を確認してください。';}
+ }catch(err){ready=false;$('detectInfo').textContent='エラー：'+(err.message||'不明なエラー');$('selected').textContent='❌ '+(err.message||'処理に失敗しました')+'。カード全体が写った写真を使用してください。';}
  finally{loaded();processing=false;$('file').disabled=false;$('start').disabled=!selectedFile;}
 });
-$('detect').onclick=async()=>{cornerVerified=false;$('cornerConfirm').checked=false;try{await ensureCv();const detected=detectQuad();if(!detected)throw Error('カードの外周を検出できません');quad=detected;initial=copy(quad);sourceDraw();rectify();$('detectInfo').textContent='カードの輪郭を再検出しました'}catch(e){$('detectInfo').textContent='再検出失敗：'+e.message}};$('reset').onclick=()=>{cornerVerified=false;$('cornerConfirm').checked=false;quad=copy(initial);sourceDraw();rectify();$('detectInfo').textContent='最後に検出したカードの四隅に戻しました'};
+$('detect').onclick=async()=>{cornerVerified=false;$('cornerConfirm').checked=false;try{const detected=detectQuad();if(!detected)throw Error('カードの外周を検出できません');quad=detected;initial=copy(quad);sourceDraw();rectify();$('detectInfo').textContent='カードの輪郭を再検出しました'}catch(e){$('detectInfo').textContent='再検出失敗：'+e.message}};$('reset').onclick=()=>{cornerVerified=false;$('cornerConfirm').checked=false;quad=copy(initial);sourceDraw();rectify();$('detectInfo').textContent='最後に検出したカードの四隅に戻しました'};
 $('cornerConfirm').addEventListener('change',e=>{cornerVerified=e.target.checked;render()});
 $('borderConfirm').addEventListener('change',e=>{borderVerified=e.target.checked;render()});
 ['side','guides','rulers'].forEach(id=>$(id).addEventListener('change',render));
