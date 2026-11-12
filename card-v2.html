@@ -1,12 +1,12 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Card Precision Lab</title><style>
 *{box-sizing:border-box}body{background:#0c1515;color:#edf4f0;font:15px system-ui,sans-serif;margin:0 auto;max-width:1050px;padding:18px}h1{font-size:23px}h2{font-size:17px;margin:0 0 12px}.box{border:1px solid #36564d;background:#162622;border-radius:14px;padding:15px;margin:14px 0}button,select,input{font:inherit}button{background:#48cb96;color:#062318;border:0;padding:10px 14px;border-radius:8px;font-weight:700;margin:4px;cursor:pointer}button.alt{background:#344d44;color:white}button:disabled{opacity:.4}input[type=file]{max-width:100%}canvas{max-width:100%;height:auto;touch-action:none;display:block;margin:auto;background:#202c29}label{display:inline-block;margin:6px 10px 6px 0}.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px}.view{overflow:auto;background:#101b19;border-radius:8px;padding:6px}.small{font-size:12px;color:#b6c8c1;line-height:1.6}.stat{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.stat>div{background:#0b1915;padding:12px;border-radius:9px}.stat b{font-size:22px}.ok{color:#55e6a7}.warn{color:#ffb477}.err{color:#ff8b86}input[type=range]{width:180px}input[type=number]{width:74px;background:#243e34;border:1px solid #5a7d6b;border-radius:6px;padding:5px;color:white}#src{cursor:crosshair}#dst{cursor:crosshair}</style></head><body>
-<div id="tapCheck" style="position:sticky;top:0;z-index:999;background:#b92b2b;color:white;padding:10px;font-weight:bold">新URL版：読み込み確認中</div><h1>🃏 CARD PRECISION LAB <span style="font-size:12px;color:#a9c5b9">v20261112.17・背景差分フォールバック</span></h1>
+<div id="tapCheck" style="position:sticky;top:0;z-index:999;background:#b92b2b;color:white;padding:10px;font-weight:bold">新URL版：読み込み確認中</div><h1>🃏 CARD PRECISION LAB <span style="font-size:12px;color:#a9c5b9">v20261112.18・認識信頼度表示</span></h1>
 <div id="loading" role="status" aria-live="polite" style="display:none;position:sticky;top:8px;z-index:5;background:#fff0c4;color:#4c3100;padding:14px;border-radius:10px;font-weight:800;text-align:center">
 <div style="display:flex;align-items:center;justify-content:center;gap:10px"><span id="spinner" style="display:inline-block;width:23px;height:23px;border:3px solid #b9a66e;border-top-color:#4c3100;border-radius:50%;animation:spin .8s linear infinite"></span><span id="loadingText">画像を読み込み中…</span><strong id="percent">0%</strong></div>
 <div style="height:12px;background:#d7c8a3;border-radius:8px;margin-top:10px;overflow:hidden"><div id="progressFill" style="width:0%;height:100%;background:#3c8d67;transition:width .1s"></div></div></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style><div class="box"><h2>1. 画像読み込み・遠近補正</h2><input type="file" id="file" accept="image/*"><button id="start" disabled>▶ 画像を読み込んで測定開始</button><p id="selected" class="small">画像を選ぶと開始ボタンが押せます。</p><div id="previewWrap" style="display:none;border:1px solid #4f9b7c;border-radius:12px;padding:10px;margin:10px 0"><strong>✓ 画像選択完了・プレビュー</strong><img id="preview" alt="選択したカード画像" style="display:block;max-width:100%;max-height:300px;object-fit:contain;margin:8px auto"><div id="previewStatus" class="small"></div></div>
 <p class="small">写真は外部送信しません。画像認識は端末内で行い、外部エンジンは不要です。カードの四隅を自動推定しますが、必ず位置を確認してください。左画像の青い丸をドラッグして四隅を調整できます。</p>
 <button id="detect" type="button" onclick="document.getElementById(&quot;tapCheck&quot;).textContent=&quot;再検出タップ受信&quot;;document.getElementById(&quot;detectInfo&quot;).textContent=&quot;再検出をタップしました。処理を開始します…&quot;;if(window.cardDetectAction){window.cardDetectAction()}else{document.getElementById(&quot;detectInfo&quot;).textContent=&quot;エラー：認識プログラムが起動していません。ページを再読み込みしてください&quot;}">四隅を再検出</button><button id="reset" type="button" class="alt" onclick="document.getElementById(&quot;tapCheck&quot;).textContent=&quot;初期化タップ受信&quot;;document.getElementById(&quot;detectInfo&quot;).textContent=&quot;初期化をタップしました…&quot;;if(window.cardResetAction){window.cardResetAction()}else{document.getElementById(&quot;detectInfo&quot;).textContent=&quot;エラー：認識プログラムが起動していません&quot;}">四隅を初期化</button><span id="resetStatus" role="status" style="display:inline-block;margin:6px;color:#ffcf41;font-weight:700"></span>
-<div class="cols"><div><h2>元画像・四隅の検出</h2><div class="view"><canvas id="src" width="320" height="300"></canvas></div></div><div><h2>遠近補正・カードのみ</h2><div class="view"><canvas id="dst" width="315" height="440"></canvas></div></div></div><p id="detectInfo" class="small">画像を選択してください。</p>
+<div class="cols"><div><h2>元画像・四隅の検出</h2><div class="view"><canvas id="src" width="320" height="300"></canvas></div></div><div><h2>遠近補正・カードのみ</h2><div class="view"><canvas id="dst" width="315" height="440"></canvas></div></div></div><div id="confidenceBox" style="margin:12px 0;padding:12px;border:1px solid #58756a;border-radius:9px"><strong>四隅の自動認識信頼度：<span id="confidenceValue">未測定</span></strong><div style="height:10px;background:#35443e;border-radius:6px;overflow:hidden;margin-top:8px"><div id="confidenceBar" style="width:0%;height:100%;background:#48cb96"></div></div><p class="small" style="margin-bottom:0">輪郭の明瞭さ・四角形の形状から推定した信頼度です。実際の正解率や測定精度を保証する数値ではありません。</p></div><p id="detectInfo" class="small">画像を選択してください。</p>
 <label><input type="checkbox" id="cornerConfirm"> 四隅がカードの実際の外周と一致することを拡大確認した</label></div>
 <div class="box"><h2>2. 測定ガイド</h2><label>面：<select id="side"><option value="front">表面</option><option value="back">裏面</option></select></label><label><input type="checkbox" id="guides" checked> 対角線・中心点</label><label><input type="checkbox" id="rulers" checked> 測定範囲・寸法</label>
 <p class="small">補正画像の緑線＝印刷枠の境界。緑線をドラッグして実際の印刷枠に合わせてください。赤い点線＝カード外周の対角線。黒点＝カード中心、黄色点＝印刷枠中心。</p>
@@ -150,6 +150,36 @@ function detectQuad(){
  if(corners.some(p=>p.x<minX-tolerance||p.x>maxX+tolerance||p.y<minY-tolerance||p.y>maxY+tolerance))return null;
  return corners.map(p=>({x:p.x/scale,y:p.y/scale}));
 }
+function updateConfidence(){
+ const out=$('confidenceValue'),bar=$('confidenceBar');
+ if(!quad||!image){out.textContent='未測定';bar.style.width='0%';return}
+ const c=document.createElement('canvas'),scale=Math.min(1,600/Math.max(image.width,image.height));
+ c.width=Math.round(image.width*scale);c.height=Math.round(image.height*scale);
+ const g=c.getContext('2d',{willReadFrequently:true});g.drawImage(image,0,0,c.width,c.height);
+ const {data}=g.getImageData(0,0,c.width,c.height),w=c.width,h=c.height;
+ const lum=(x,y)=>{x=Math.max(0,Math.min(w-1,Math.round(x)));y=Math.max(0,Math.min(h-1,Math.round(y)));const k=(y*w+x)*4;return .2126*data[k]+.7152*data[k+1]+.0722*data[k+2]};
+ let total=0,strong=0,contrast=0;
+ for(let j=0;j<4;j++){
+  const a=quad[j],b=quad[(j+1)%4],dx=(b.x-a.x)*scale,dy=(b.y-a.y)*scale,len=Math.hypot(dx,dy);
+  if(len<10)continue;
+  const nx=-dy/len,ny=dx/len;
+  for(let i=1;i<=30;i++){
+   const t=.12+.76*i/31,x=(a.x+(b.x-a.x)*t)*scale,y=(a.y+(b.y-a.y)*t)*scale;
+   const d=Math.abs(lum(x+nx*3,y+ny*3)-lum(x-nx*3,y-ny*3));
+   contrast+=d;strong+=d>=24?1:0;total++;
+  }
+ }
+ const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+ const width=(dist(quad[0],quad[1])+dist(quad[2],quad[3]))/2;
+ const height=(dist(quad[0],quad[3])+dist(quad[1],quad[2]))/2;
+ const ratio=height/Math.max(1,width),ratioScore=Math.max(0,1-Math.abs(ratio-88/63)/.5);
+ const edgeScore=total?Math.min(1,(contrast/total)/60)*.6+(strong/total)*.4:0;
+ const area=Math.abs(quad.reduce((sum,p,i)=>sum+p.x*quad[(i+1)%4].y-quad[(i+1)%4].x*p.y,0))/2;
+ const areaScore=Math.min(1,area/(image.width*image.height*.28));
+ const score=Math.round(100*(edgeScore*.7+ratioScore*.2+areaScore*.1));
+ out.textContent=score+'%（'+(score>=75?'高':score>=50?'中':'低')+'）';
+ bar.style.width=score+'%';bar.style.background=score>=75?'#48cb96':score>=50?'#e4b45c':'#e27a70';
+}
 function estimateInnerBorder(){
  // Scan yellow-to-blue transitions on rectified card back; estimate only.
  const p=dc.getImageData(0,0,W,H).data;
@@ -186,7 +216,7 @@ function drawRedContours(){
  sc.restore();
 }
 let innerEstimated=false;
-function sourceDraw(){if(!image)return;sc.clearRect(0,0,src.width,src.height);sc.drawImage(image,0,0,src.width,src.height);sc.lineWidth=2;sc.strokeStyle='#40a8ff';sc.beginPath();quad.forEach((p,i)=>i?sc.lineTo(p.x*srcScale,p.y*srcScale):sc.moveTo(p.x*srcScale,p.y*srcScale));sc.closePath();sc.stroke();drawRedContours();quad.forEach((p,i)=>{sc.beginPath();sc.fillStyle='#40a8ff';sc.arc(p.x*srcScale,p.y*srcScale,7,0,Math.PI*2);sc.fill();sc.fillStyle='#fff';sc.font='bold 12px sans-serif';sc.fillText(String(i+1),p.x*srcScale+9,p.y*srcScale-8)})}
+function sourceDraw(){if(!image)return;updateConfidence();sc.clearRect(0,0,src.width,src.height);sc.drawImage(image,0,0,src.width,src.height);sc.lineWidth=2;sc.strokeStyle='#40a8ff';sc.beginPath();quad.forEach((p,i)=>i?sc.lineTo(p.x*srcScale,p.y*srcScale):sc.moveTo(p.x*srcScale,p.y*srcScale));sc.closePath();sc.stroke();drawRedContours();quad.forEach((p,i)=>{sc.beginPath();sc.fillStyle='#40a8ff';sc.arc(p.x*srcScale,p.y*srcScale,7,0,Math.PI*2);sc.fill();sc.fillStyle='#fff';sc.font='bold 12px sans-serif';sc.fillText(String(i+1),p.x*srcScale+9,p.y*srcScale-8)})}
 function solve(A,b){for(let k=0;k<b.length;k++){let pivot=k;for(let i=k+1;i<b.length;i++)if(Math.abs(A[i][k])>Math.abs(A[pivot][k]))pivot=i;[A[k],A[pivot]]=[A[pivot],A[k]];[b[k],b[pivot]]=[b[pivot],b[k]];if(Math.abs(A[k][k])<1e-10)return null;let z=A[k][k];for(let j=k;j<b.length;j++)A[k][j]/=z;b[k]/=z;for(let i=0;i<b.length;i++){if(i===k)continue;let f=A[i][k];for(let j=k;j<b.length;j++)A[i][j]-=f*A[k][j];b[i]-=f*b[k]}}return b}
 function homography(q){let targets=[[0,0],[W-1,0],[W-1,H-1],[0,H-1]],A=[],b=[];for(let i=0;i<4;i++){let [x,y]=targets[i],{x:u,y:v}=q[i];A.push([x,y,1,0,0,0,-x*u,-y*u]);b.push(u);A.push([0,0,0,x,y,1,-x*v,-y*v]);b.push(v)}return solve(A,b)}
 function rectify(){if(!image||!quad)return;let h=homography(quad);if(!h){ready=false;$('detectInfo').textContent='四隅の位置が不正です。';return}let data=sourceCanvas.getContext('2d').getImageData(0,0,image.width,image.height),out=dc.createImageData(W,H),sw=image.width,sh=image.height,a=data.data,o=out.data;
