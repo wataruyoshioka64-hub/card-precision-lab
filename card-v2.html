@@ -1,0 +1,317 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Card Precision Lab</title><style>
+*{box-sizing:border-box}body{background:#0c1515;color:#edf4f0;font:15px system-ui,sans-serif;margin:0 auto;max-width:1050px;padding:18px}h1{font-size:23px}h2{font-size:17px;margin:0 0 12px}.box{border:1px solid #36564d;background:#162622;border-radius:14px;padding:15px;margin:14px 0}button,select,input{font:inherit}button{background:#48cb96;color:#062318;border:0;padding:10px 14px;border-radius:8px;font-weight:700;margin:4px;cursor:pointer}button.alt{background:#344d44;color:white}button:disabled{opacity:.4}input[type=file]{max-width:100%}canvas{max-width:100%;height:auto;touch-action:none;display:block;margin:auto;background:#202c29}label{display:inline-block;margin:6px 10px 6px 0}.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px}.view{overflow:auto;background:#101b19;border-radius:8px;padding:6px}.small{font-size:12px;color:#b6c8c1;line-height:1.6}.stat{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.stat>div{background:#0b1915;padding:12px;border-radius:9px}.stat b{font-size:22px}.ok{color:#55e6a7}.warn{color:#ffb477}.err{color:#ff8b86}input[type=range]{width:180px}input[type=number]{width:74px;background:#243e34;border:1px solid #5a7d6b;border-radius:6px;padding:5px;color:white}#src{cursor:crosshair}#dst{cursor:crosshair}</style></head><body>
+<div id="tapCheck" style="position:sticky;top:0;z-index:999;background:#b92b2b;color:white;padding:10px;font-weight:bold">新URL版：読み込み確認中</div><h1>🃏 CARD PRECISION LAB <span style="font-size:12px;color:#a9c5b9">v20261112.16・新URL動作検証</span></h1>
+<div id="loading" role="status" aria-live="polite" style="display:none;position:sticky;top:8px;z-index:5;background:#fff0c4;color:#4c3100;padding:14px;border-radius:10px;font-weight:800;text-align:center">
+<div style="display:flex;align-items:center;justify-content:center;gap:10px"><span id="spinner" style="display:inline-block;width:23px;height:23px;border:3px solid #b9a66e;border-top-color:#4c3100;border-radius:50%;animation:spin .8s linear infinite"></span><span id="loadingText">画像を読み込み中…</span><strong id="percent">0%</strong></div>
+<div style="height:12px;background:#d7c8a3;border-radius:8px;margin-top:10px;overflow:hidden"><div id="progressFill" style="width:0%;height:100%;background:#3c8d67;transition:width .1s"></div></div></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style><div class="box"><h2>1. 画像読み込み・遠近補正</h2><input type="file" id="file" accept="image/*"><button id="start" disabled>▶ 画像を読み込んで測定開始</button><p id="selected" class="small">画像を選ぶと開始ボタンが押せます。</p><div id="previewWrap" style="display:none;border:1px solid #4f9b7c;border-radius:12px;padding:10px;margin:10px 0"><strong>✓ 画像選択完了・プレビュー</strong><img id="preview" alt="選択したカード画像" style="display:block;max-width:100%;max-height:300px;object-fit:contain;margin:8px auto"><div id="previewStatus" class="small"></div></div>
+<p class="small">写真は外部送信しません。画像認識は端末内で行い、外部エンジンは不要です。カードの四隅を自動推定しますが、必ず位置を確認してください。左画像の青い丸をドラッグして四隅を調整できます。</p>
+<button id="detect" type="button" onclick="document.getElementById(&quot;tapCheck&quot;).textContent=&quot;再検出タップ受信&quot;;document.getElementById(&quot;detectInfo&quot;).textContent=&quot;再検出をタップしました。処理を開始します…&quot;;if(window.cardDetectAction){window.cardDetectAction()}else{document.getElementById(&quot;detectInfo&quot;).textContent=&quot;エラー：認識プログラムが起動していません。ページを再読み込みしてください&quot;}">四隅を再検出</button><button id="reset" type="button" class="alt" onclick="document.getElementById(&quot;tapCheck&quot;).textContent=&quot;初期化タップ受信&quot;;document.getElementById(&quot;detectInfo&quot;).textContent=&quot;初期化をタップしました…&quot;;if(window.cardResetAction){window.cardResetAction()}else{document.getElementById(&quot;detectInfo&quot;).textContent=&quot;エラー：認識プログラムが起動していません&quot;}">四隅を初期化</button><span id="resetStatus" role="status" style="display:inline-block;margin:6px;color:#ffcf41;font-weight:700"></span>
+<div class="cols"><div><h2>元画像・四隅の検出</h2><div class="view"><canvas id="src" width="320" height="300"></canvas></div></div><div><h2>遠近補正・カードのみ</h2><div class="view"><canvas id="dst" width="315" height="440"></canvas></div></div></div><p id="detectInfo" class="small">画像を選択してください。</p>
+<label><input type="checkbox" id="cornerConfirm"> 四隅がカードの実際の外周と一致することを拡大確認した</label></div>
+<div class="box"><h2>2. 測定ガイド</h2><label>面：<select id="side"><option value="front">表面</option><option value="back">裏面</option></select></label><label><input type="checkbox" id="guides" checked> 対角線・中心点</label><label><input type="checkbox" id="rulers" checked> 測定範囲・寸法</label>
+<p class="small">補正画像の緑線＝印刷枠の境界。緑線をドラッグして実際の印刷枠に合わせてください。赤い点線＝カード外周の対角線。黒点＝カード中心、黄色点＝印刷枠中心。</p>
+<label><input type="checkbox" id="borderConfirm"> 緑線4本が実際の印刷枠境界と一致することを拡大確認した</label>
+<div class="cols"><div><div class="view"><canvas id="measure" width="315" height="440"></canvas></div></div><div><h2>測定結果</h2><div class="stat"><div>左右<br><b id="lr">—</b><div id="lrmm" class="small"></div></div><div>上下<br><b id="tb">—</b><div id="tbmm" class="small"></div></div><div>中心のズレ<br><b id="offset">—</b><div id="offsetxy" class="small"></div></div><div>ランク<br><b id="rank">—</b><div class="small">S ≤ 51.00 / A ≤ 54.00 / B ＞ 54.00</div></div></div><p id="verdict"></p><button id="export" disabled>補正画像と測定線をPNG保存</button><button id="report" disabled class="alt">数値をCSV保存</button></div></div>
+<p class="small">mm換算はカードを63×88mmの規格寸法と仮定した推定値です。裁断差、反り、レンズ歪み、四隅の検出誤差、画像解像度により実寸と一致しないことがあります。1mm未満の精度を保証するものではありません。自動推定だけでは合格確定にしません。画像だけでは精度を証明できず、実寸基準の校正が必要です。</p></div>
+<script>
+'use strict';
+document.getElementById('tapCheck').textContent='新URL版：プログラム起動済み';
+const $=id=>document.getElementById(id), src=$('src'), dst=$('dst'), meas=$('measure'), sc=src.getContext('2d'), dc=dst.getContext('2d',{willReadFrequently:true}),mc=meas.getContext('2d');
+const W=315,H=440; let image=null, sourceCanvas=null, quad=null, initial=null, edges=[24,291,31,409], srcScale=1, dragging=null, ready=false, values=null;
+let cornerVerified=false, borderVerified=false;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)), dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+function copy(q){return q.map(p=>({...p}))}
+function fitSource(){
+ const max=1600, ratio=Math.min(1,max/Math.max(image.width,image.height));
+ if(ratio<1){
+  const tmp=document.createElement('canvas');tmp.width=Math.round(image.width*ratio);tmp.height=Math.round(image.height*ratio);
+  tmp.getContext('2d').drawImage(image,0,0,tmp.width,tmp.height);
+  image=tmp;
+ }
+ let s=Math.min(1,750/Math.max(image.width,image.height));
+ src.width=Math.max(1,Math.round(image.width*s));src.height=Math.max(1,Math.round(image.height*s));srcScale=src.width/image.width;
+ sourceCanvas=document.createElement('canvas');sourceCanvas.width=image.width;sourceCanvas.height=image.height;sourceCanvas.getContext('2d').drawImage(image,0,0);
+}
+function loading(message,pct=0){$('loading').style.display='block';$('loadingText').textContent=message;$('percent').textContent=Math.round(pct)+'%';$('progressFill').style.width=Math.round(pct)+'%';$('detectInfo').textContent=message}
+function loaded(){$('loading').style.display='none'}
+const nextFrame=()=>new Promise(resolve=>setTimeout(resolve,20));
+
+function initQuad(){const w=image.width,h=image.height;return [{x:w*.12,y:h*.1},{x:w*.88,y:h*.1},{x:w*.88,y:h*.9},{x:w*.12,y:h*.9}]}
+function detectQuad(){
+ // Local-only pixel segmentation. No external OpenCV script or network required.
+ // Optimized for the yellow outer border of a Pokemon card back.
+ const c=document.createElement('canvas'),scale=Math.min(1,450/Math.max(image.width,image.height));
+ c.width=Math.max(2,Math.round(image.width*scale));c.height=Math.max(2,Math.round(image.height*scale));
+ const g=c.getContext('2d',{willReadFrequently:true});g.drawImage(image,0,0,c.width,c.height);
+ const w=c.width,h=c.height,data=g.getImageData(0,0,w,h).data,n=w*h;
+ const yellow=new Uint8Array(n);
+ for(let i=0;i<n;i++){
+  const k=i*4,r=data[k]/255,gg=data[k+1]/255,bb=data[k+2]/255;
+  const mx=Math.max(r,gg,bb),mn=Math.min(r,gg,bb),delta=mx-mn;
+  let hue=0;if(delta){if(mx===r)hue=60*((gg-bb)/delta%6);else if(mx===gg)hue=60*((bb-r)/delta+2);else hue=60*((r-gg)/delta+4)}
+  if(hue<0)hue+=360;
+  const sat=mx===0?0:delta/mx;
+  if(hue>=24&&hue<=84&&sat>=.17&&mx>=.25)yellow[i]=1;
+ }
+ // Dilate and erode to connect the yellow border across minor glare.
+ function morph(src,dilate,radius){
+  // Integral-image box morphology: constant work per pixel rather than 81 neighbor checks.
+  const stride=w+1,integral=new Int32Array(stride*(h+1));
+  for(let y=1;y<=h;y++){let sum=0;for(let x=1;x<=w;x++){sum+=src[(y-1)*w+x-1];integral[y*stride+x]=integral[(y-1)*stride+x]+sum}}
+  const dst=new Uint8Array(n);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+   const x0=Math.max(0,x-radius),x1=Math.min(w,x+radius+1),y0=Math.max(0,y-radius),y1=Math.min(h,y+radius+1);
+   const sum=integral[y1*stride+x1]-integral[y0*stride+x1]-integral[y1*stride+x0]+integral[y0*stride+x0];
+   dst[y*w+x]=dilate?(sum>0?1:0):(sum===(2*radius+1)**2?1:0);
+  }
+  return dst;
+ }
+ const closed=morph(morph(yellow,true,4),false,4);
+ const seen=new Uint8Array(n),queue=new Int32Array(n);let best=null,bestCount=0,bestPixels=null;
+ for(let seed=0;seed<n;seed++){
+  if(!closed[seed]||seen[seed])continue;
+  let head=0,tail=1;queue[0]=seed;seen[seed]=1;
+  let tl=null,tr=null,br=null,bl=null,count=0,minX=w,minY=h,maxX=0,maxY=0;
+  while(head<tail){
+   const i=queue[head++],x=i%w,y=(i-x)/w;count++;
+   if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;
+   const p={x,y};
+   if(!tl||x+y<tl.x+tl.y)tl=p;
+   if(!br||x+y>br.x+br.y)br=p;
+   if(!tr||x-y>tr.x-tr.y)tr=p;
+   if(!bl||x-y<bl.x-bl.y)bl=p;
+   const near=[i-1,i+1,i-w,i+w];
+   for(let j=0;j<4;j++){
+    const v=near[j];if(v<0||v>=n||(j===0&&x===0)||(j===1&&x===w-1)||seen[v]||!closed[v])continue;
+    seen[v]=1;queue[tail++]=v;
+   }
+  }
+  if(count<Math.max(300,n*.002)||maxX-minX<w*.23||maxY-minY<h*.3)continue;
+  const q=[tl,tr,br,bl],distance=(p,t)=>Math.hypot(p.x-t.x,p.y-t.y);
+  if(q.some((p,i)=>distance(p,q[(i+1)%4])<Math.min(w,h)*.18))continue;
+  const qw=(distance(tl,tr)+distance(bl,br))/2,qh=(distance(tl,bl)+distance(tr,br))/2,ratio=qh/qw;
+  if(ratio<1.08||ratio>2.05)continue;
+  if(count>bestCount){bestCount=count;best=q.map(p=>({x:p.x/scale,y:p.y/scale}));bestPixels=queue.slice(0,tail)}
+ }
+
+ if(!best||!bestPixels)return null;
+ // Fit four long card edges, avoiding rounded corner extrema.
+ const rowMin=new Int32Array(h).fill(w),rowMax=new Int32Array(h).fill(-1);
+ const colMin=new Int32Array(w).fill(h),colMax=new Int32Array(w).fill(-1);
+ for(let i=0;i<bestPixels.length;i++){const id=bestPixels[i],x=id%w,y=(id-x)/w;
+  if(x<rowMin[y])rowMin[y]=x;if(x>rowMax[y])rowMax[y]=x;
+  if(y<colMin[x])colMin[x]=y;if(y>colMax[x])colMax[x]=y;
+ }
+ const xs=best.map(p=>p.x*scale),ys=best.map(p=>p.y*scale);
+ const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
+ function fitLine(points){
+  if(points.length<12)return null;
+  function regression(a){let sx=0,sy=0,sxx=0,sxy=0;for(const p of a){sx+=p[0];sy+=p[1];sxx+=p[0]*p[0];sxy+=p[0]*p[1]}
+   const n=a.length,den=n*sxx-sx*sx;if(Math.abs(den)<1e-7)return null;
+   const m=(n*sxy-sx*sy)/den;return {m,b:(sy-m*sx)/n};}
+  let line=regression(points);if(!line)return null;
+  const errors=points.map(p=>Math.abs(p[1]-line.m*p[0]-line.b)).sort((a,b)=>a-b);
+  const cutoff=Math.max(2,errors[Math.floor(errors.length*.75)]*1.5);
+  return regression(points.filter(p=>Math.abs(p[1]-line.m*p[0]-line.b)<=cutoff));
+ }
+ const left=[],right=[],top=[],bottom=[];
+ for(let y=Math.ceil(minY+(maxY-minY)*.18);y<=Math.floor(maxY-(maxY-minY)*.18);y++){
+  if(rowMax[y]-rowMin[y]>(maxX-minX)*.55){left.push([y,rowMin[y]]);right.push([y,rowMax[y]])}
+ }
+ for(let x=Math.ceil(minX+(maxX-minX)*.18);x<=Math.floor(maxX-(maxX-minX)*.18);x++){
+  if(colMax[x]-colMin[x]>(maxY-minY)*.55){top.push([x,colMin[x]]);bottom.push([x,colMax[x]])}
+ }
+ const L=fitLine(left),R=fitLine(right),T=fitLine(top),B=fitLine(bottom);
+ if(!L||!R||!T||!B)return null;
+ function intersect(side,cap){
+  const denominator=1-side.m*cap.m;
+  if(Math.abs(denominator)<.15)return null;
+  const x=(side.m*cap.b+side.b)/denominator;
+  return {x,y:cap.m*x+cap.b};
+ }
+ const corners=[intersect(L,T),intersect(R,T),intersect(R,B),intersect(L,B)];
+ if(corners.some(p=>!p||!Number.isFinite(p.x)||!Number.isFinite(p.y)))return null;
+ const tolerance=Math.max(w,h)*.06;
+ if(corners.some(p=>p.x<minX-tolerance||p.x>maxX+tolerance||p.y<minY-tolerance||p.y>maxY+tolerance))return null;
+ return corners.map(p=>({x:p.x/scale,y:p.y/scale}));
+}
+function estimateInnerBorder(){
+ // Scan yellow-to-blue transitions on rectified card back; estimate only.
+ const p=dc.getImageData(0,0,W,H).data;
+ const isBlue=(x,y)=>{const i=(y*W+x)*4,r=p[i],g=p[i+1],b=p[i+2];return b>r*1.12&&b>g*.98&&b>55};
+ function median(a){a.sort((x,y)=>x-y);return a.length?a[Math.floor(a.length/2)]:null}
+ const left=[],right=[],top=[],bottom=[];
+ for(let y=Math.round(H*.18);y<H*.82;y+=6){
+  for(let x=4;x<W*.19;x++)if(isBlue(x,y)&&isBlue(x+2,y)){left.push(x);break}
+  for(let x=W-5;x>W*.81;x--)if(isBlue(x,y)&&isBlue(x-2,y)){right.push(x);break}
+ }
+ for(let x=Math.round(W*.2);x<W*.8;x+=6){
+  for(let y=4;y<H*.17;y++)if(isBlue(x,y)&&isBlue(x,y+2)){top.push(y);break}
+  for(let y=H-5;y>H*.83;y--)if(isBlue(x,y)&&isBlue(x,y-2)){bottom.push(y);break}
+ }
+ if(Math.min(left.length,right.length,top.length,bottom.length)<5)return null;
+ const e=[median(left),median(right),median(top),median(bottom)];
+ if(e[0]<2||e[1]>W-3||e[2]<2||e[3]>H-3||e[0]>=e[1]||e[2]>=e[3])return null;
+ return e;
+}
+function drawRedContours(){
+ if(!quad)return;
+ const outer=quad.map(p=>({x:p.x*srcScale,y:p.y*srcScale}));
+ sc.save();sc.strokeStyle='#ff3434';sc.lineWidth=3;sc.setLineDash([]);
+ sc.beginPath();outer.forEach((p,i)=>i?sc.lineTo(p.x,p.y):sc.moveTo(p.x,p.y));sc.closePath();sc.stroke();
+ if(ready&&innerEstimated){
+  const h=homography(quad);if(h){
+   const [l,r,t,b]=edges,pts=[[l,t],[r,t],[r,b],[l,b]].map(([x,y])=>{
+    const d=h[6]*x+h[7]*y+1;return {x:(h[0]*x+h[1]*y+h[2])/d*srcScale,y:(h[3]*x+h[4]*y+h[5])/d*srcScale}
+   });
+   sc.strokeStyle='#ff5555';sc.setLineDash([7,4]);sc.lineWidth=2;sc.beginPath();
+   pts.forEach((p,i)=>i?sc.lineTo(p.x,p.y):sc.moveTo(p.x,p.y));sc.closePath();sc.stroke();
+  }
+ }
+ sc.restore();
+}
+let innerEstimated=false;
+function sourceDraw(){if(!image)return;sc.clearRect(0,0,src.width,src.height);sc.drawImage(image,0,0,src.width,src.height);sc.lineWidth=2;sc.strokeStyle='#40a8ff';sc.beginPath();quad.forEach((p,i)=>i?sc.lineTo(p.x*srcScale,p.y*srcScale):sc.moveTo(p.x*srcScale,p.y*srcScale));sc.closePath();sc.stroke();drawRedContours();quad.forEach((p,i)=>{sc.beginPath();sc.fillStyle='#40a8ff';sc.arc(p.x*srcScale,p.y*srcScale,7,0,Math.PI*2);sc.fill();sc.fillStyle='#fff';sc.font='bold 12px sans-serif';sc.fillText(String(i+1),p.x*srcScale+9,p.y*srcScale-8)})}
+function solve(A,b){for(let k=0;k<b.length;k++){let pivot=k;for(let i=k+1;i<b.length;i++)if(Math.abs(A[i][k])>Math.abs(A[pivot][k]))pivot=i;[A[k],A[pivot]]=[A[pivot],A[k]];[b[k],b[pivot]]=[b[pivot],b[k]];if(Math.abs(A[k][k])<1e-10)return null;let z=A[k][k];for(let j=k;j<b.length;j++)A[k][j]/=z;b[k]/=z;for(let i=0;i<b.length;i++){if(i===k)continue;let f=A[i][k];for(let j=k;j<b.length;j++)A[i][j]-=f*A[k][j];b[i]-=f*b[k]}}return b}
+function homography(q){let targets=[[0,0],[W-1,0],[W-1,H-1],[0,H-1]],A=[],b=[];for(let i=0;i<4;i++){let [x,y]=targets[i],{x:u,y:v}=q[i];A.push([x,y,1,0,0,0,-x*u,-y*u]);b.push(u);A.push([0,0,0,x,y,1,-x*v,-y*v]);b.push(v)}return solve(A,b)}
+function rectify(){if(!image||!quad)return;let h=homography(quad);if(!h){ready=false;$('detectInfo').textContent='四隅の位置が不正です。';return}let data=sourceCanvas.getContext('2d').getImageData(0,0,image.width,image.height),out=dc.createImageData(W,H),sw=image.width,sh=image.height,a=data.data,o=out.data;
+for(let y=0;y<H;y++)for(let x=0;x<W;x++){let den=h[6]*x+h[7]*y+1,u=(h[0]*x+h[1]*y+h[2])/den,v=(h[3]*x+h[4]*y+h[5])/den,idx=(y*W+x)*4;if(u<0||v<0||u>=sw-1||v>=sh-1){o[idx+3]=0;continue}let ix=Math.floor(u),iy=Math.floor(v),fx=u-ix,fy=v-iy,k=(iy*sw+ix)*4;for(let ch=0;ch<3;ch++)o[idx+ch]=a[k+ch]*(1-fx)*(1-fy)+a[k+4+ch]*fx*(1-fy)+a[k+sw*4+ch]*(1-fx)*fy+a[k+sw*4+4+ch]*fx*fy;o[idx+3]=255}
+dc.putImageData(out,0,0);ready=true;const detectedInner=estimateInnerBorder();innerEstimated=!!detectedInner;if(detectedInner)edges=detectedInner;borderVerified=false;$('borderConfirm').checked=false;render();sourceDraw();}
+async function rectifyWithProgress(){
+ if(!image||!quad)throw Error('カード画像がありません');
+ const h=homography(quad);if(!h)throw Error('四隅の位置が不正です');
+ const data=sourceCanvas.getContext('2d').getImageData(0,0,image.width,image.height);
+ const out=dc.createImageData(W,H),sw=image.width,sh=image.height,a=data.data,o=out.data;
+ for(let y=0;y<H;y++){
+  for(let x=0;x<W;x++){
+   let den=h[6]*x+h[7]*y+1,u=(h[0]*x+h[1]*y+h[2])/den,v=(h[3]*x+h[4]*y+h[5])/den,idx=(y*W+x)*4;
+   if(u<0||v<0||u>=sw-1||v>=sh-1){o[idx+3]=0;continue}
+   let ix=Math.floor(u),iy=Math.floor(v),fx=u-ix,fy=v-iy,k=(iy*sw+ix)*4;
+   for(let ch=0;ch<3;ch++)o[idx+ch]=a[k+ch]*(1-fx)*(1-fy)+a[k+4+ch]*fx*(1-fy)+a[k+sw*4+ch]*(1-fx)*fy+a[k+sw*4+4+ch]*fx*fy;
+   o[idx+3]=255;
+  }
+  if(y%40===39){loading('カードを正面に補正中…',45+Math.floor((y+1)/H*53));await nextFrame()}
+ }
+ dc.putImageData(out,0,0);ready=true;render();
+}
+
+function line(x1,y1,x2,y2,color,width=1,dash=[]){mc.beginPath();mc.strokeStyle=color;mc.lineWidth=width;mc.setLineDash(dash);mc.moveTo(x1,y1);mc.lineTo(x2,y2);mc.stroke();mc.setLineDash([])}
+function render(){if(!ready)return;mc.clearRect(0,0,W,H);mc.drawImage(dst,0,0);let [l,r,t,b]=edges;
+mc.save();mc.strokeStyle='#ff3434';mc.lineWidth=3;mc.strokeRect(1.5,1.5,W-3,H-3);if(innerEstimated){mc.setLineDash([6,4]);mc.lineWidth=2.5;mc.strokeRect(l,t,r-l,b-t);mc.setLineDash([])}mc.restore();
+if($('guides').checked){line(0,0,W,H,'rgba(255,65,65,.65)',1.3,[5,5]);line(W,0,0,H,'rgba(255,65,65,.65)',1.3,[5,5])}
+line(l,0,l,H,'#35eea0',1.5);line(r,0,r,H,'#35eea0',1.5);line(0,t,W,t,'#35eea0',1.5);line(0,b,W,b,'#35eea0',1.5);
+const cx=W/2,cy=H/2,ix=(l+r)/2,iy=(t+b)/2;
+if($('guides').checked){line(cx,cy,ix,iy,'#ffcf41',2);mc.fillStyle='#111';mc.strokeStyle='#fff';mc.lineWidth=1.5;mc.beginPath();mc.arc(cx,cy,5,0,Math.PI*2);mc.fill();mc.stroke();mc.fillStyle='#ffda36';mc.strokeStyle='#111';mc.beginPath();mc.arc(ix,iy,4,0,Math.PI*2);mc.fill();mc.stroke()}
+const left=l,right=W-r,top=t,bottom=H-b,valid=Math.min(left,right,top,bottom)>0&&l<r&&t<b;
+let lr=valid?100*Math.max(left,right)/(left+right):NaN,tb=valid?100*Math.max(top,bottom)/(top+bottom):NaN;
+let dx=(ix-cx)*63/W,dy=(iy-cy)*88/H,offset=Math.hypot(dx,dy);
+const fmt=v=>Number.isFinite(v)?v.toFixed(2):'—';let rank=(valid&&cornerVerified&&borderVerified)?(Math.max(lr,tb)<=51?'S':Math.max(lr,tb)<=54?'A':'B'):'未判定';
+$('lr').textContent=(valid&&cornerVerified&&borderVerified)?`${fmt(lr)} : ${fmt(100-lr)}`:'—';$('tb').textContent=(valid&&cornerVerified&&borderVerified)?`${fmt(tb)} : ${fmt(100-tb)}`:'—';$('lrmm').textContent=(valid&&cornerVerified&&borderVerified)?`左 ${fmt(left*63/W)} mm / 右 ${fmt(right*63/W)} mm`:'測定線を調整';$('tbmm').textContent=(valid&&cornerVerified&&borderVerified)?`上 ${fmt(top*88/H)} mm / 下 ${fmt(bottom*88/H)} mm`:'測定線を調整';$('offset').textContent=(valid&&cornerVerified&&borderVerified)?`${fmt(offset)} mm`:'—';$('offsetxy').textContent=(valid&&cornerVerified&&borderVerified)?`横 ${fmt(Math.abs(dx))} mm（${dx>=0?'右':'左'}） / 縦 ${fmt(Math.abs(dy))} mm（${dy>=0?'下':'上'}）`:'—';$('rank').textContent=rank;$('rank').className=rank==='B'?'err':'ok';$('verdict').textContent=!cornerVerified||!borderVerified?'未確定：四隅と印刷枠の位置確認が必要です':rank==='B'?'受付不可：54:46を超えています':rank==='—'?'測定線を確認してください':'センタリング基準内（写真測定の暫定結果）';$('verdict').className=rank==='B'?'err':'ok';$('export').disabled=false;$('report').disabled=!(valid&&cornerVerified&&borderVerified);
+if($('rulers').checked){mc.font='bold 12px sans-serif';mc.textAlign='center';mc.fillStyle='#ffdf6d';mc.fillText(`L ${fmt(left*63/W)}mm`,Math.max(35,l/2),H/2);mc.fillText(`R ${fmt(right*63/W)}mm`,Math.min(W-35,(r+W)/2),H/2);mc.fillText(`T ${fmt(top*88/H)}mm`,W/2,Math.max(16,t/2));mc.fillText(`B ${fmt(bottom*88/H)}mm`,W/2,Math.min(H-8,(b+H)/2))}
+values=(valid&&cornerVerified&&borderVerified)?{lr,tb,dx,dy,offset,rank,left,right,top,bottom}:null;
+}
+function pointer(e,canvas){let r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*canvas.width/r.width,y:(e.clientY-r.top)*canvas.height/r.height}}
+src.addEventListener('pointerdown',e=>{if(!quad)return;let p=pointer(e,src),idx=quad.findIndex(q=>dist({x:q.x*srcScale,y:q.y*srcScale},p)<23);if(idx<0)return;dragging={kind:'quad',idx};src.setPointerCapture(e.pointerId)});
+src.addEventListener('pointermove',e=>{if(!dragging||dragging.kind!=='quad')return;let p=pointer(e,src);cornerVerified=false;$('cornerConfirm').checked=false;quad[dragging.idx]={x:clamp(p.x/srcScale,0,image.width-1),y:clamp(p.y/srcScale,0,image.height-1)};sourceDraw();rectify()});
+src.addEventListener('pointerup',()=>dragging=null);src.addEventListener('pointercancel',()=>dragging=null);
+meas.addEventListener('pointerdown',e=>{if(!ready)return;let p=pointer(e,meas),ds=[Math.abs(p.x-edges[0]),Math.abs(p.x-edges[1]),Math.abs(p.y-edges[2]),Math.abs(p.y-edges[3])],v=Math.min(...ds);if(v>24)return;dragging={kind:'edge',idx:ds.indexOf(v)};meas.setPointerCapture(e.pointerId)});
+meas.addEventListener('pointermove',e=>{if(!dragging||dragging.kind!=='edge')return;let p=pointer(e,meas),i=dragging.idx;borderVerified=false;$('borderConfirm').checked=false;edges[i]=clamp(i<2?p.x:p.y,1,i<2?W-1:H-1);render()});
+meas.addEventListener('pointerup',()=>dragging=null);meas.addEventListener('pointercancel',()=>dragging=null);
+let selectedFile=null,processing=false,previewURL=null;
+$('file').addEventListener('change',e=>{
+ selectedFile=e.target.files&&e.target.files[0]||null;
+ $('start').disabled=!selectedFile||processing;
+ $('selected').textContent=selectedFile?'選択済み：'+selectedFile.name+'（'+(selectedFile.size/1048576).toFixed(2)+' MB）':'画像を選んでください。';
+ if(previewURL){URL.revokeObjectURL(previewURL);previewURL=null}
+ $('previewWrap').style.display=selectedFile?'block':'none';
+ if(selectedFile){
+  $('previewStatus').textContent='プレビュー読み込み中…';
+  previewURL=URL.createObjectURL(selectedFile);
+  const pic=$('preview');
+  pic.onload=()=>{$('previewStatus').textContent='画像表示成功：'+pic.naturalWidth+'×'+pic.naturalHeight+'px。次に「測定開始」を押してください。'};
+  pic.onerror=()=>{$('previewStatus').textContent='画像プレビューに失敗。JPEGまたはPNG画像でお試しください。'};
+  pic.src=previewURL;
+ }
+
+ $('detectInfo').textContent=selectedFile?'「画像を読み込んで測定開始」を押してください。':'画像を選択してください。';
+});
+function readFileWithProgress(f){return new Promise((resolve,reject)=>{
+ const reader=new FileReader();
+ reader.onprogress=e=>{if(e.lengthComputable)loading('画像ファイルを読み込み中…',Math.min(35,Math.round(e.loaded/e.total*35)))};
+ reader.onerror=()=>reject(new Error('ファイルの読み込みに失敗しました'));
+ reader.onabort=()=>reject(new Error('読み込みが中断されました'));
+ reader.onload=()=>{loading('画像ファイルの読み込み完了',35);resolve(reader.result)};
+ reader.readAsDataURL(f);
+})}
+$('start').addEventListener('click',async()=>{
+ const f=selectedFile;if(!f||processing)return;
+ processing=true;$('start').disabled=true;$('file').disabled=true;
+ ready=false;innerEstimated=false;cornerVerified=false;borderVerified=false;$('cornerConfirm').checked=false;$('borderConfirm').checked=false;
+ $('detect').disabled=false;$('reset').disabled=false;$('export').disabled=true;$('report').disabled=true;
+ loading('画像ファイルを読み込み中…',0);await nextFrame();
+ try{
+  const dataUrl=await readFileWithProgress(f);
+  loading('画像を展開中…',36);await nextFrame();
+  const im=new Image();
+  await new Promise((resolve,reject)=>{im.onload=resolve;im.onerror=()=>reject(new Error('画像を展開できません。JPEGまたはPNGをお試しください'));im.src=dataUrl});
+  image=im;loading('画像サイズを調整中…',39);await nextFrame();fitSource();$('detect').disabled=false;$('reset').disabled=false;
+  loading('端末内でカードの輪郭を解析中…',40);await nextFrame();loading('カードの四隅を推定中…',43);await nextFrame();const autoQuad=detectQuad();loading('カードの外周候補を確認中…',44);await nextFrame();if(!autoQuad)throw Error('カードの外周を確実に検出できません。背景を単色にして、カード全体を撮影してください。');quad=autoQuad;initial=copy(quad);
+  edges=[24,291,31,409];loading('補正画像を作成中…',45);await nextFrame();
+  sourceDraw();await rectifyWithProgress();loading('測定画面を表示中…',99);await nextFrame();
+  if(!ready)throw new Error('補正画像の作成に失敗しました');
+  $('detect').disabled=false;$('reset').disabled=false;
+  loading('読み込み完了',100);await new Promise(r=>setTimeout(r,300));
+  $('detectInfo').textContent=(autoQuad?'画像の読み込み完了。黄色い外周を検出しました（要確認）。':'画像の読み込み完了。四隅の自動認識に失敗したため、青い点を手動調整してください。')+' 緑の印刷枠も調整してください。';
+ }catch(err){ready=false;$('detect').disabled=false;$('reset').disabled=false;loading('処理失敗：'+(err.message||'不明なエラー'),0);$('detectInfo').textContent='エラー：'+(err.message||'不明なエラー');$('selected').textContent='❌ '+(err.message||'処理に失敗しました')+'。カード全体が写った写真を使用してください。';}
+ finally{loaded();processing=false;$('file').disabled=false;$('start').disabled=!selectedFile;}
+});
+let detectClicks=0,resetClicks=0;
+window.cardDetectAction=async()=>{
+ const id=++detectClicks;
+ $('detectInfo').textContent='再検出ボタンを受け付けました（'+id+'回目）。解析中…';
+ $('detect').textContent='再検出中…';
+ await new Promise(resolve=>setTimeout(resolve,60));
+ try{
+  if(!image)throw Error('画像が未読込です。最初に測定開始を押してください');
+  const detected=detectQuad();
+  if(!detected)throw Error('カード外周を検出できませんでした');
+  const changed=!quad||detected.some((p,i)=>Math.hypot(p.x-quad[i].x,p.y-quad[i].y)>2);
+  quad=detected;initial=copy(quad);cornerVerified=false;$('cornerConfirm').checked=false;
+  sourceDraw();rectify();$('reset').disabled=false;
+  $('detectInfo').textContent='再検出完了（'+id+'回目）。'+(changed?'四隅を更新しました。':'前回と同じ四隅でした。同じ写真では同じ結果になる場合があります。');
+ }catch(err){$('detectInfo').textContent='再検出エラー（'+id+'回目）：'+(err.message||String(err))}
+ finally{$('detect').textContent='四隅を再検出'}
+};
+window.cardResetAction=()=>{
+ const id=++resetClicks, status=$('resetStatus');
+ status.textContent='初期化操作 '+id+'回目：処理中';
+ try{
+  if(!image)throw Error('先に画像を読み込んでください');
+  if(!initial){
+   if(!quad)throw Error('四隅が未検出です。先に測定開始してください');
+   initial=copy(quad);
+  }
+  const before=quad?copy(quad):null;
+  quad=copy(initial);
+  cornerVerified=false;$('cornerConfirm').checked=false;
+  sourceDraw();
+  if(sourceCanvas)rectify();
+  const changed=before&&quad.some((p,i)=>Math.hypot(p.x-before[i].x,p.y-before[i].y)>0.5);
+  const message=changed?'四隅を最初の検出位置に戻しました':'初期化完了。四隅はすでに初期位置なので見た目は変わりません';
+  status.textContent=message+'（'+id+'回目）';
+  $('detectInfo').textContent=message;
+ }catch(err){
+  status.textContent='初期化できません：'+(err.message||String(err));
+  $('detectInfo').textContent=status.textContent;
+ }
+};
+$('cornerConfirm').addEventListener('change',e=>{cornerVerified=e.target.checked;render()});
+$('borderConfirm').addEventListener('change',e=>{borderVerified=e.target.checked;render()});
+['side','guides','rulers'].forEach(id=>$(id).addEventListener('change',render));
+$('export').onclick=()=>{if(!ready)return;let a=document.createElement('a');a.download='card-centering-overlay.png';a.href=meas.toDataURL('image/png');a.click()};
+$('report').onclick=()=>{if(!values)return;let v=values,rows=[['side','rank','left_right_major_percent','top_bottom_major_percent','left_mm','right_mm','top_mm','bottom_mm','offset_x_mm','offset_y_mm','offset_distance_mm'],[$('side').value,v.rank,v.lr.toFixed(2),v.tb.toFixed(2),...( [v.left*63/W,v.right*63/W,v.top*88/H,v.bottom*88/H,v.dx,v.dy,v.offset].map(n=>n.toFixed(3)))]];let blob=new Blob([rows.map(r=>r.join(',')).join('\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='centering-measurements.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+</script><script>
+window.addEventListener('error',function(e){var n=document.getElementById('detectInfo');if(n)n.textContent='プログラムエラー: '+(e.message||'不明')+' / '+(e.lineno||'');});
+window.addEventListener('unhandledrejection',function(e){var n=document.getElementById('detectInfo');if(n)n.textContent='処理エラー: '+(e.reason&&e.reason.message||String(e.reason));});
+document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('#detect,#reset');if(!b)return;var n=document.getElementById('detectInfo');if(n)n.textContent='タップ確認: '+b.textContent+' / '+new Date().toLocaleTimeString();},true);
+</script></body></html>
