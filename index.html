@@ -36,6 +36,32 @@ function loaded(){$('loading').style.display='none'}
 const nextFrame=()=>new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,0)));
 
 function initQuad(){const w=image.width,h=image.height;return [{x:w*.12,y:h*.1},{x:w*.88,y:h*.1},{x:w*.88,y:h*.9},{x:w*.12,y:h*.9}]}
+let cvLoadPromise=null;
+function cvReady(){return !!(window.cv&&typeof window.cv.Mat==='function'&&typeof window.cv.imread==='function')}
+function loadCvScript(url,timeout=18000){return new Promise((resolve,reject)=>{
+ const el=document.createElement('script');let done=false;
+ const timer=setTimeout(()=>finish(new Error('認識エンジンの通信がタイムアウトしました')),timeout);
+ function finish(err){if(done)return;done=true;clearTimeout(timer);if(err){el.remove();reject(err)}else resolve()}
+ el.onload=async()=>{try{
+   if(window.cv&&typeof window.cv.then==='function')window.cv=await window.cv;
+   if(cvReady())return finish();
+   if(window.cv&&typeof window.cv.onRuntimeInitialized!=='undefined')window.cv.onRuntimeInitialized=()=>finish();
+   const start=Date.now();const poll=setInterval(()=>{if(done){clearInterval(poll);return}if(cvReady()){clearInterval(poll);finish()}else if(Date.now()-start>12000){clearInterval(poll);finish(new Error('認識エンジンの初期化に失敗'))}},100);
+  }catch(e){finish(e)}};
+ el.onerror=()=>finish(new Error('認識エンジンの配信元に接続できません'));
+ el.src=url;document.head.appendChild(el);
+})}
+async function ensureCv(){
+ if(cvReady())return;
+ if(!cvLoadPromise)cvLoadPromise=(async()=>{
+  let last;
+  for(const url of ['https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js','https://docs.opencv.org/4.x/opencv.js']){
+   try{await loadCvScript(url);if(cvReady())return}catch(e){last=e}
+  }
+  throw last||Error('認識エンジンを読み込めません');
+ })();
+ try{await cvLoadPromise}catch(e){cvLoadPromise=null;throw e}
+}
 function detectQuad(){
  // HSV yellow card rim segmentation, matching the photographed Pokemon card back.
  // This is a targeted detection strategy, not a universal card detector.
@@ -157,20 +183,20 @@ $('start').addEventListener('click',async()=>{
   const im=new Image();
   await new Promise((resolve,reject)=>{im.onload=resolve;im.onerror=()=>reject(new Error('画像を展開できません。JPEGまたはPNGをお試しください'));im.src=dataUrl});
   image=im;loading('画像サイズを調整中…',39);await nextFrame();fitSource();
-  loading('カードの四隅を推定中…',43);await nextFrame();const autoQuad=detectQuad();if(!autoQuad)throw Error('カードの外周を確実に検出できません。背景を単色にして、カード全体を撮影してください。');quad=autoQuad;initial=copy(quad);
+  loading('認識エンジンを準備中…',40);await nextFrame();await ensureCv();loading('カードの四隅を推定中…',43);await nextFrame();const autoQuad=detectQuad();if(!autoQuad)throw Error('カードの外周を確実に検出できません。背景を単色にして、カード全体を撮影してください。');quad=autoQuad;initial=copy(quad);
   edges=[24,291,31,409];loading('補正画像を作成中…',45);await nextFrame();
   sourceDraw();await rectifyWithProgress();loading('測定画面を表示中…',99);await nextFrame();
   if(!ready)throw new Error('補正画像の作成に失敗しました');
   $('detect').disabled=false;$('reset').disabled=false;
   loading('読み込み完了',100);await new Promise(r=>setTimeout(r,300));
   $('detectInfo').textContent=(autoQuad?'画像の読み込み完了。黄色い外周を検出しました（要確認）。':'画像の読み込み完了。四隅の自動認識に失敗したため、青い点を手動調整してください。')+' 緑の印刷枠も調整してください。';
- }catch(err){ready=false;$('detectInfo').textContent='エラー：'+(err.message||'不明なエラー');$('selected').textContent='❌ '+(err.message||'処理に失敗しました')+'。別のJPEG/PNGを試してください。';}
+ }catch(err){ready=false;$('detectInfo').textContent='エラー：'+(err.message||'不明なエラー');$('selected').textContent='❌ '+(err.message||'処理に失敗しました')+'。認識エンジンの通信エラーの場合は接続状態を確認してください。';}
  finally{loaded();processing=false;$('file').disabled=false;$('start').disabled=!selectedFile;}
 });
-$('detect').onclick=()=>{cornerVerified=false;$('cornerConfirm').checked=false;try{const detected=detectQuad();if(!detected)throw Error('カードの外周を検出できません');quad=detected;initial=copy(quad);sourceDraw();rectify();$('detectInfo').textContent='カードの輪郭を再検出しました'}catch(e){$('detectInfo').textContent='再検出失敗：'+e.message}};$('reset').onclick=()=>{cornerVerified=false;$('cornerConfirm').checked=false;quad=copy(initial);sourceDraw();rectify();$('detectInfo').textContent='最後に検出したカードの四隅に戻しました'};
+$('detect').onclick=async()=>{cornerVerified=false;$('cornerConfirm').checked=false;try{await ensureCv();const detected=detectQuad();if(!detected)throw Error('カードの外周を検出できません');quad=detected;initial=copy(quad);sourceDraw();rectify();$('detectInfo').textContent='カードの輪郭を再検出しました'}catch(e){$('detectInfo').textContent='再検出失敗：'+e.message}};$('reset').onclick=()=>{cornerVerified=false;$('cornerConfirm').checked=false;quad=copy(initial);sourceDraw();rectify();$('detectInfo').textContent='最後に検出したカードの四隅に戻しました'};
 $('cornerConfirm').addEventListener('change',e=>{cornerVerified=e.target.checked;render()});
 $('borderConfirm').addEventListener('change',e=>{borderVerified=e.target.checked;render()});
 ['side','guides','rulers'].forEach(id=>$(id).addEventListener('change',render));
 $('export').onclick=()=>{if(!ready)return;let a=document.createElement('a');a.download='card-centering-overlay.png';a.href=meas.toDataURL('image/png');a.click()};
 $('report').onclick=()=>{if(!values)return;let v=values,rows=[['side','rank','left_right_major_percent','top_bottom_major_percent','left_mm','right_mm','top_mm','bottom_mm','offset_x_mm','offset_y_mm','offset_distance_mm'],[$('side').value,v.rank,v.lr.toFixed(2),v.tb.toFixed(2),...( [v.left*63/W,v.right*63/W,v.top*88/H,v.bottom*88/H,v.dx,v.dy,v.offset].map(n=>n.toFixed(3)))]];let blob=new Blob([rows.map(r=>r.join(',')).join('\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='centering-measurements.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
-</script><script async src="https://docs.opencv.org/4.x/opencv.js"></script></body></html>
+</script></body></html>
