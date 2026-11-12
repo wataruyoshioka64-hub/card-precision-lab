@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Card Precision Lab</title><style>
 *{box-sizing:border-box}body{background:#0c1515;color:#edf4f0;font:15px system-ui,sans-serif;margin:0 auto;max-width:1050px;padding:18px}h1{font-size:23px}h2{font-size:17px;margin:0 0 12px}.box{border:1px solid #36564d;background:#162622;border-radius:14px;padding:15px;margin:14px 0}button,select,input{font:inherit}button{background:#48cb96;color:#062318;border:0;padding:10px 14px;border-radius:8px;font-weight:700;margin:4px;cursor:pointer}button.alt{background:#344d44;color:white}button:disabled{opacity:.4}input[type=file]{max-width:100%}canvas{max-width:100%;height:auto;touch-action:none;display:block;margin:auto;background:#202c29}label{display:inline-block;margin:6px 10px 6px 0}.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px}.view{overflow:auto;background:#101b19;border-radius:8px;padding:6px}.small{font-size:12px;color:#b6c8c1;line-height:1.6}.stat{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.stat>div{background:#0b1915;padding:12px;border-radius:9px}.stat b{font-size:22px}.ok{color:#55e6a7}.warn{color:#ffb477}.err{color:#ff8b86}input[type=range]{width:180px}input[type=number]{width:74px;background:#243e34;border:1px solid #5a7d6b;border-radius:6px;padding:5px;color:white}#src{cursor:crosshair}#dst{cursor:crosshair}</style></head><body>
-<h1>🃏 CARD PRECISION LAB <span style="font-size:12px;color:#a9c5b9">v20261112.18・認識信頼度表示</span></h1>
+<h1>🃏 CARD PRECISION LAB <span style="font-size:12px;color:#a9c5b9">v20261112.19・直線エッジ認識</span></h1>
 <div id="loading" role="status" aria-live="polite" style="display:none;position:sticky;top:8px;z-index:5;background:#fff0c4;color:#4c3100;padding:14px;border-radius:10px;font-weight:800;text-align:center">
 <div style="display:flex;align-items:center;justify-content:center;gap:10px"><span id="spinner" style="display:inline-block;width:23px;height:23px;border:3px solid #b9a66e;border-top-color:#4c3100;border-radius:50%;animation:spin .8s linear infinite"></span><span id="loadingText">画像を読み込み中…</span><strong id="percent">0%</strong></div>
 <div style="height:12px;background:#d7c8a3;border-radius:8px;margin-top:10px;overflow:hidden"><div id="progressFill" style="width:0%;height:100%;background:#3c8d67;transition:width .1s"></div></div></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style><div class="box"><h2>1. 画像読み込み・遠近補正</h2><input type="file" id="file" accept="image/*"><button id="start" disabled>▶ 画像を読み込んで測定開始</button><p id="selected" class="small">画像を選ぶと開始ボタンが押せます。</p><div id="previewWrap" style="display:none;border:1px solid #4f9b7c;border-radius:12px;padding:10px;margin:10px 0"><strong>✓ 画像選択完了・プレビュー</strong><img id="preview" alt="選択したカード画像" style="display:block;max-width:100%;max-height:300px;object-fit:contain;margin:8px auto"><div id="previewStatus" class="small"></div></div>
@@ -36,7 +36,87 @@ function loaded(){$('loading').style.display='none'}
 const nextFrame=()=>new Promise(resolve=>setTimeout(resolve,20));
 
 function initQuad(){const w=image.width,h=image.height;return [{x:w*.12,y:h*.1},{x:w*.88,y:h*.1},{x:w*.88,y:h*.9},{x:w*.12,y:h*.9}]}
-function detectQuad(){
+function detectQuadEdges(){
+ // Grayscale gradient + weighted Hough lines; no dependence on card color.
+ const c=document.createElement('canvas'),scale=Math.min(1,420/Math.max(image.width,image.height));
+ c.width=Math.max(20,Math.round(image.width*scale));c.height=Math.max(20,Math.round(image.height*scale));
+ const g=c.getContext('2d',{willReadFrequently:true});g.drawImage(image,0,0,c.width,c.height);
+ const w=c.width,h=c.height,p=g.getImageData(0,0,w,h).data,n=w*h,gray=new Float32Array(n);
+ for(let i=0;i<n;i++){const k=i*4;gray[i]=.299*p[k]+.587*p[k+1]+.114*p[k+2]}
+ const mag=new Float32Array(n),angle=new Float32Array(n);
+ let maxMag=0;
+ for(let y=2;y<h-2;y++)for(let x=2;x<w-2;x++){
+  const i=y*w+x,gx=(gray[i+1-w]+2*gray[i+1]+gray[i+1+w])-(gray[i-1-w]+2*gray[i-1]+gray[i-1+w]);
+  const gy=(gray[i-1+w]+2*gray[i+w]+gray[i+1+w])-(gray[i-1-w]+2*gray[i-w]+gray[i+1-w]);
+  const m=Math.hypot(gx,gy);mag[i]=m;angle[i]=Math.atan2(gy,gx);if(m>maxMag)maxMag=m;
+ }
+ const threshold=Math.max(55,maxMag*.15),thetaBins=180,rhoMax=Math.ceil(Math.hypot(w,h)),rhoBins=2*rhoMax+1;
+ const votes=new Float32Array(thetaBins*rhoBins),cos=new Float32Array(thetaBins),sin=new Float32Array(thetaBins);
+ for(let t=0;t<thetaBins;t++){cos[t]=Math.cos(t*Math.PI/thetaBins);sin[t]=Math.sin(t*Math.PI/thetaBins)}
+ for(let y=2;y<h-2;y+=2)for(let x=2;x<w-2;x+=2){
+  const i=y*w+x,m=mag[i];if(m<threshold)continue;
+  let t=Math.round((angle[i]+Math.PI)*180/Math.PI)%180;
+  for(let dt=-2;dt<=2;dt++){const ti=(t+dt+180)%180,r=Math.round(x*cos[ti]+y*sin[ti])+rhoMax;if(r>=0&&r<rhoBins)votes[ti*rhoBins+r]+=Math.min(3,m/threshold)}
+ }
+ const peaks=[];
+ for(let t=0;t<thetaBins;t++)for(let r=0;r<rhoBins;r++){
+  const v=votes[t*rhoBins+r];if(v<Math.max(16,Math.min(w,h)*.09))continue;
+  let best=true;
+  for(let dt=-3;dt<=3&&best;dt++)for(let dr=-5;dr<=5;dr++){
+   if(!dt&&!dr)continue;const tt=(t+dt+180)%180,rr=dt&&((t+dt<0)||(t+dt>=180))?2*rhoMax-r:r+dr;
+   if(rr>=0&&rr<rhoBins&&votes[tt*rhoBins+rr]>v){best=false;break}
+  }
+  if(best)peaks.push({t,r:r-rhoMax,v});
+ }
+ peaks.sort((a,b)=>b.v-a.v);
+ const lines=[];
+ for(const z of peaks){
+  if(lines.length>=32)break;
+  if(lines.some(a=>Math.abs(a.t-z.t)<5&&Math.abs(a.r-z.r)<9))continue;
+  lines.push({a:cos[z.t],b:sin[z.t],r:z.r,v:z.v,t:z.t});
+ }
+ const intersect=(a,b)=>{const d=a.a*b.b-b.a*a.b;if(Math.abs(d)<.12)return null;return{x:(a.r*b.b-b.r*a.b)/d,y:(a.a*b.r-b.a*a.r)/d}};
+ const length=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+ function support(a,b){
+  const len=length(a,b),steps=Math.min(100,Math.max(20,Math.round(len/3)));let hits=0;
+  for(let k=2;k<steps-2;k++){
+   const f=k/(steps-1),x=a.x+(b.x-a.x)*f,y=a.y+(b.y-a.y)*f;
+   let good=false;
+   for(let d=-2;d<=2;d++){const xx=Math.round(x+a.a*d),yy=Math.round(y+a.b*d);if(xx>=2&&xx<w-2&&yy>=2&&yy<h-2&&mag[yy*w+xx]>threshold){good=true;break}}
+   if(good)hits++;
+  }
+  return hits/Math.max(1,steps-4);
+ }
+ let winner=null,bestScore=-Infinity;
+ const limit=Math.min(lines.length,24);
+ for(let i=0;i<limit;i++)for(let j=i+1;j<limit;j++){
+  const a=lines[i],b=lines[j],parallel=Math.abs(a.a*b.a+a.b*b.b);
+  if(parallel<.94||Math.abs(a.r-b.r)<Math.min(w,h)*.16)continue;
+  for(let k=0;k<limit;k++){if(k===i||k===j)continue;
+   const d=lines[k];if(Math.abs(a.a*d.a+a.b*d.b)>.35)continue;
+   for(let l=k+1;l<limit;l++){if(l===i||l===j)continue;
+    const e=lines[l];if(Math.abs(d.a*e.a+d.b*e.b)<.94||Math.abs(d.r-e.r)<Math.min(w,h)*.16)continue;
+    const q=[intersect(a,d),intersect(b,d),intersect(b,e),intersect(a,e)];
+    if(q.some(p=>!p||p.x<2||p.y<2||p.x>w-3||p.y>h-3))continue;
+    const cx=q.reduce((z,p)=>z+p.x,0)/4,cy=q.reduce((z,p)=>z+p.y,0)/4;
+    q.sort((p1,p2)=>Math.atan2(p1.y-cy,p1.x-cx)-Math.atan2(p2.y-cy,p2.x-cx));
+    let start=0,min=Infinity;for(let z=0;z<4;z++){const v=q[z].x+q[z].y;if(v<min){min=v;start=z}}
+    const corners=[...q.slice(start),...q.slice(0,start)];
+    const widths=(length(corners[0],corners[1])+length(corners[2],corners[3]))/2;
+    const heights=(length(corners[0],corners[3])+length(corners[1],corners[2]))/2;
+    const ratio=heights/Math.max(1,widths);if(ratio<.85||ratio>2.3)continue;
+    const area=Math.abs(corners.reduce((sum,p,z)=>sum+p.x*corners[(z+1)%4].y-corners[(z+1)%4].x*p.y,0))/2;
+    if(area<w*h*.075||area>w*h*.94)continue;
+    const edges=[support(corners[0],corners[1]),support(corners[1],corners[2]),support(corners[2],corners[3]),support(corners[3],corners[0])];
+    const minEdge=Math.min(...edges),avg=edges.reduce((x,y)=>x+y,0)/4;
+    const score=avg*.65+minEdge*.2+Math.min(1,area/(w*h*.35))*.1+Math.max(0,1-Math.abs(ratio-88/63))*.05;
+    if(score>bestScore){bestScore=score;winner=corners}
+   }
+  }
+ }
+ return winner&&bestScore>=.22?winner.map(p=>({x:p.x/scale,y:p.y/scale})):null;
+}
+function detectQuadColor(){
  // Local-only pixel segmentation. No external OpenCV script or network required.
  // Optimized for the yellow outer border of a Pokemon card back.
  const c=document.createElement('canvas'),scale=Math.min(1,450/Math.max(image.width,image.height));
@@ -149,6 +229,7 @@ function detectQuad(){
  if(corners.some(p=>p.x<minX-tolerance||p.x>maxX+tolerance||p.y<minY-tolerance||p.y>maxY+tolerance))return null;
  return corners.map(p=>({x:p.x/scale,y:p.y/scale}));
 }
+function detectQuad(){return detectQuadEdges()||detectQuadColor()}
 function updateConfidence(){
  const out=$('confidenceValue'),bar=$('confidenceBar');
  if(!quad||!image){out.textContent='未測定';bar.style.width='0%';return}
