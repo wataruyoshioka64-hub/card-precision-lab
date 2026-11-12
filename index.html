@@ -37,48 +37,42 @@ const nextFrame=()=>new Promise(resolve=>requestAnimationFrame(()=>setTimeout(re
 
 function initQuad(){const w=image.width,h=image.height;return [{x:w*.12,y:h*.1},{x:w*.88,y:h*.1},{x:w*.88,y:h*.9},{x:w*.12,y:h*.9}]}
 function detectQuad(){
- // Find a four-sided physical card boundary, not merely pixels different from the background.
- // No trustworthy quadrilateral => no measurement.
- const c=document.createElement('canvas'),scale=Math.min(1,650/Math.max(image.width,image.height));
- c.width=Math.max(2,Math.round(image.width*scale));c.height=Math.max(2,Math.round(image.height*scale));
- const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(image,0,0,c.width,c.height);
- const cv=window.cv;
- if(!cv||!cv.Mat||!cv.imread){throw Error('カード認識エンジンを読み込めません。通信状態を確認して再試行してください。')}
- let srcMat,gray,blur,edgesMat,contours,hierarchy,kernel;
+ // HSV yellow card rim segmentation, matching the photographed Pokemon card back.
+ // This is a targeted detection strategy, not a universal card detector.
+ const c=document.createElement('canvas'),scale=Math.min(1,850/Math.max(image.width,image.height));
+ c.width=Math.round(image.width*scale);c.height=Math.round(image.height*scale);
+ const g=c.getContext('2d',{willReadFrequently:true});g.drawImage(image,0,0,c.width,c.height);
+ const cv=window.cv;if(!cv||!cv.Mat||!cv.imread)throw Error('OpenCV認識エンジンが未読込です。ページを再読込してください。');
+ let rgba,hsv,mask,kernel,contours,hierarchy;
  try{
-  srcMat=cv.imread(c);gray=new cv.Mat();blur=new cv.Mat();edgesMat=new cv.Mat();contours=new cv.MatVector();hierarchy=new cv.Mat();
-  cv.cvtColor(srcMat,gray,cv.COLOR_RGBA2GRAY);
-  cv.GaussianBlur(gray,blur,new cv.Size(5,5),0);
-  cv.Canny(blur,edgesMat,45,135);
-  kernel=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(3,3));
-  cv.morphologyEx(edgesMat,edgesMat,cv.MORPH_CLOSE,kernel);
-  cv.findContours(edgesMat,contours,hierarchy,cv.RETR_LIST,cv.CHAIN_APPROX_SIMPLE);
-  let best=null,bestScore=-Infinity;
-  const total=c.width*c.height;
+  rgba=cv.imread(c);hsv=new cv.Mat();mask=new cv.Mat();contours=new cv.MatVector();hierarchy=new cv.Mat();
+  cv.cvtColor(rgba,hsv,cv.COLOR_RGBA2RGB);let rgb=hsv;hsv=new cv.Mat();cv.cvtColor(rgb,hsv,cv.COLOR_RGB2HSV);rgb.delete();
+  const lo=new cv.Mat(hsv.rows,hsv.cols,hsv.type(),[12,45,65,0]),hi=new cv.Mat(hsv.rows,hsv.cols,hsv.type(),[42,255,255,255]);
+  cv.inRange(hsv,lo,hi,mask);lo.delete();hi.delete();
+  kernel=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(17,17));cv.morphologyEx(mask,mask,cv.MORPH_CLOSE,kernel);
+  cv.findContours(mask,contours,hierarchy,cv.RETR_EXTERNAL,cv.CHAIN_APPROX_SIMPLE);
+  let best=null,area=0;
   for(let i=0;i<contours.size();i++){
-   const contour=contours.get(i);let approx=new cv.Mat();
+   let contour=contours.get(i),hull=new cv.Mat();
    try{
-    const perimeter=cv.arcLength(contour,true),area=cv.contourArea(contour);
-    if(area<total*.08||area>total*.96)continue;
-    cv.approxPolyDP(contour,approx,.025*perimeter,true);
-    if(approx.rows!==4||!cv.isContourConvex(approx))continue;
-    let points=[];for(let j=0;j<4;j++)points.push({x:approx.intPtr(j,0)[0],y:approx.intPtr(j,0)[1]});
-    const cx=points.reduce((a,p)=>a+p.x,0)/4,cy=points.reduce((a,p)=>a+p.y,0)/4;
-    const ordered=points.slice().sort((a,b)=>Math.atan2(a.y-cy,a.x-cx)-Math.atan2(b.y-cy,b.x-cx));
-    const tl=points.reduce((a,p)=>p.x+p.y<a.x+a.y?p:a);
-    const idx=ordered.indexOf(tl),seq=[...ordered.slice(idx),...ordered.slice(0,idx)];
-    const q=seq[1].x>seq[3].x?seq:[seq[0],seq[3],seq[2],seq[1]];
+    const a=cv.contourArea(contour);if(a<area||a<c.width*c.height*.1)continue;
+    cv.convexHull(contour,hull,false,true);
+    const pts=[];for(let j=0;j<hull.rows;j++){const v=hull.intPtr(j,0);pts.push({x:v[0],y:v[1]})}
+    if(pts.length<4)continue;
+    const tl=pts.reduce((p,q)=>q.x+q.y<p.x+p.y?q:p);
+    const br=pts.reduce((p,q)=>q.x+q.y>p.x+p.y?q:p);
+    const tr=pts.reduce((p,q)=>q.x-q.y>p.x-p.y?q:p);
+    const bl=pts.reduce((p,q)=>q.x-q.y<p.x-p.y?q:p);
+    const q=[tl,tr,br,bl];
     const side=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
-    const w=(side(q[0],q[1])+side(q[2],q[3]))/2,h=(side(q[1],q[2])+side(q[3],q[0]))/2;
-    const ratio=Math.max(w,h)/Math.min(w,h);
-    if(ratio<1.12||ratio>1.9)continue;
-    const centerDistance=Math.hypot(cx-c.width/2,cy-c.height/2)/Math.hypot(c.width,c.height);
-    const score=area/total*2-Math.abs(ratio-88/63)*.75-centerDistance*.5;
-    if(score>bestScore){bestScore=score;best=q.map(p=>({x:p.x/scale,y:p.y/scale}))}
-   }finally{approx.delete();contour.delete()}
+    const width=(side(tl,tr)+side(bl,br))/2,height=(side(tl,bl)+side(tr,br))/2;
+    const ratio=height/width;
+    if(ratio<1.05||ratio>2.05||Math.min(...q.map((p,i)=>side(p,q[(i+1)%4])))<c.width*.2)continue;
+    best=q.map(p=>({x:p.x/scale,y:p.y/scale}));area=a;
+   }finally{hull.delete();contour.delete()}
   }
   return best;
- }finally{for(const m of [srcMat,gray,blur,edgesMat,contours,hierarchy,kernel])if(m)m.delete()}
+ }finally{for(const x of [rgba,hsv,mask,kernel,contours,hierarchy])if(x)x.delete()}
 }
 function sourceDraw(){if(!image)return;sc.clearRect(0,0,src.width,src.height);sc.drawImage(image,0,0,src.width,src.height);sc.lineWidth=2;sc.strokeStyle='#40a8ff';sc.beginPath();quad.forEach((p,i)=>i?sc.lineTo(p.x*srcScale,p.y*srcScale):sc.moveTo(p.x*srcScale,p.y*srcScale));sc.closePath();sc.stroke();quad.forEach((p,i)=>{sc.beginPath();sc.fillStyle='#40a8ff';sc.arc(p.x*srcScale,p.y*srcScale,7,0,Math.PI*2);sc.fill();sc.fillStyle='#fff';sc.font='bold 12px sans-serif';sc.fillText(String(i+1),p.x*srcScale+9,p.y*srcScale-8)})}
 function solve(A,b){for(let k=0;k<b.length;k++){let pivot=k;for(let i=k+1;i<b.length;i++)if(Math.abs(A[i][k])>Math.abs(A[pivot][k]))pivot=i;[A[k],A[pivot]]=[A[pivot],A[k]];[b[k],b[pivot]]=[b[pivot],b[k]];if(Math.abs(A[k][k])<1e-10)return null;let z=A[k][k];for(let j=k;j<b.length;j++)A[k][j]/=z;b[k]/=z;for(let i=0;i<b.length;i++){if(i===k)continue;let f=A[i][k];for(let j=k;j<b.length;j++)A[i][j]-=f*A[k][j];b[i]-=f*b[k]}}return b}
@@ -169,7 +163,7 @@ $('start').addEventListener('click',async()=>{
   if(!ready)throw new Error('補正画像の作成に失敗しました');
   $('detect').disabled=false;$('reset').disabled=false;
   loading('読み込み完了',100);await new Promise(r=>setTimeout(r,300));
-  $('detectInfo').textContent=(autoQuad?'画像の読み込み完了。四隅は自動推定（要確認）。':'画像の読み込み完了。四隅の自動認識に失敗したため、青い点を手動調整してください。')+' 緑の印刷枠も調整してください。';
+  $('detectInfo').textContent=(autoQuad?'画像の読み込み完了。黄色い外周を検出しました（要確認）。':'画像の読み込み完了。四隅の自動認識に失敗したため、青い点を手動調整してください。')+' 緑の印刷枠も調整してください。';
  }catch(err){ready=false;$('detectInfo').textContent='エラー：'+(err.message||'不明なエラー');$('selected').textContent='❌ '+(err.message||'処理に失敗しました')+'。別のJPEG/PNGを試してください。';}
  finally{loaded();processing=false;$('file').disabled=false;$('start').disabled=!selectedFile;}
 });
