@@ -1,11 +1,11 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Card Precision Lab</title><style>
 *{box-sizing:border-box}body{background:#0c1515;color:#edf4f0;font:15px system-ui,sans-serif;margin:0 auto;max-width:1050px;padding:18px}h1{font-size:23px}h2{font-size:17px;margin:0 0 12px}.box{border:1px solid #36564d;background:#162622;border-radius:14px;padding:15px;margin:14px 0}button,select,input{font:inherit}button{background:#48cb96;color:#062318;border:0;padding:10px 14px;border-radius:8px;font-weight:700;margin:4px;cursor:pointer}button.alt{background:#344d44;color:white}button:disabled{opacity:.4}input[type=file]{max-width:100%}canvas{max-width:100%;height:auto;touch-action:none;display:block;margin:auto;background:#202c29}label{display:inline-block;margin:6px 10px 6px 0}.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px}.view{overflow:auto;background:#101b19;border-radius:8px;padding:6px}.small{font-size:12px;color:#b6c8c1;line-height:1.6}.stat{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.stat>div{background:#0b1915;padding:12px;border-radius:9px}.stat b{font-size:22px}.ok{color:#55e6a7}.warn{color:#ffb477}.err{color:#ff8b86}input[type=range]{width:180px}input[type=number]{width:74px;background:#243e34;border:1px solid #5a7d6b;border-radius:6px;padding:5px;color:white}#src{cursor:crosshair}#dst{cursor:crosshair}</style></head><body>
-<h1>🃏 CARD PRECISION LAB <span style="font-size:12px;color:#a9c5b9">v20261112.10・赤い内外枠</span></h1>
+<h1>🃏 CARD PRECISION LAB <span style="font-size:12px;color:#a9c5b9">v20261112.11・操作ボタン常時有効</span></h1>
 <div id="loading" role="status" aria-live="polite" style="display:none;position:sticky;top:8px;z-index:5;background:#fff0c4;color:#4c3100;padding:14px;border-radius:10px;font-weight:800;text-align:center">
 <div style="display:flex;align-items:center;justify-content:center;gap:10px"><span id="spinner" style="display:inline-block;width:23px;height:23px;border:3px solid #b9a66e;border-top-color:#4c3100;border-radius:50%;animation:spin .8s linear infinite"></span><span id="loadingText">画像を読み込み中…</span><strong id="percent">0%</strong></div>
 <div style="height:12px;background:#d7c8a3;border-radius:8px;margin-top:10px;overflow:hidden"><div id="progressFill" style="width:0%;height:100%;background:#3c8d67;transition:width .1s"></div></div></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style><div class="box"><h2>1. 画像読み込み・遠近補正</h2><input type="file" id="file" accept="image/*"><button id="start" disabled>▶ 画像を読み込んで測定開始</button><p id="selected" class="small">画像を選ぶと開始ボタンが押せます。</p><div id="previewWrap" style="display:none;border:1px solid #4f9b7c;border-radius:12px;padding:10px;margin:10px 0"><strong>✓ 画像選択完了・プレビュー</strong><img id="preview" alt="選択したカード画像" style="display:block;max-width:100%;max-height:300px;object-fit:contain;margin:8px auto"><div id="previewStatus" class="small"></div></div>
 <p class="small">写真は外部送信しません。画像認識は端末内で行い、外部エンジンは不要です。カードの四隅を自動推定しますが、必ず位置を確認してください。左画像の青い丸をドラッグして四隅を調整できます。</p>
-<button id="detect" disabled>四隅を再検出</button><button id="reset" class="alt" disabled>四隅を初期化</button>
+<button id="detect" type="button">四隅を再検出</button><button id="reset" type="button" class="alt">四隅を初期化</button>
 <div class="cols"><div><h2>元画像・四隅の検出</h2><div class="view"><canvas id="src" width="320" height="300"></canvas></div></div><div><h2>遠近補正・カードのみ</h2><div class="view"><canvas id="dst" width="315" height="440"></canvas></div></div></div><p id="detectInfo" class="small">画像を選択してください。</p>
 <label><input type="checkbox" id="cornerConfirm"> 四隅がカードの実際の外周と一致することを拡大確認した</label></div>
 <div class="box"><h2>2. 測定ガイド</h2><label>面：<select id="side"><option value="front">表面</option><option value="back">裏面</option></select></label><label><input type="checkbox" id="guides" checked> 対角線・中心点</label><label><input type="checkbox" id="rulers" checked> 測定範囲・寸法</label>
@@ -246,14 +246,14 @@ $('start').addEventListener('click',async()=>{
  const f=selectedFile;if(!f||processing)return;
  processing=true;$('start').disabled=true;$('file').disabled=true;
  ready=false;innerEstimated=false;cornerVerified=false;borderVerified=false;$('cornerConfirm').checked=false;$('borderConfirm').checked=false;
- $('detect').disabled=true;$('reset').disabled=true;$('export').disabled=true;$('report').disabled=true;
+ $('detect').disabled=false;$('reset').disabled=false;$('export').disabled=true;$('report').disabled=true;
  loading('画像ファイルを読み込み中…',0);await nextFrame();
  try{
   const dataUrl=await readFileWithProgress(f);
   loading('画像を展開中…',36);await nextFrame();
   const im=new Image();
   await new Promise((resolve,reject)=>{im.onload=resolve;im.onerror=()=>reject(new Error('画像を展開できません。JPEGまたはPNGをお試しください'));im.src=dataUrl});
-  image=im;loading('画像サイズを調整中…',39);await nextFrame();fitSource();$('detect').disabled=false;$('reset').disabled=true;
+  image=im;loading('画像サイズを調整中…',39);await nextFrame();fitSource();$('detect').disabled=false;$('reset').disabled=false;
   loading('端末内でカードの輪郭を解析中…',40);await nextFrame();loading('カードの四隅を推定中…',43);await nextFrame();const autoQuad=detectQuad();loading('カードの外周候補を確認中…',44);await nextFrame();if(!autoQuad)throw Error('カードの外周を確実に検出できません。背景を単色にして、カード全体を撮影してください。');quad=autoQuad;initial=copy(quad);
   edges=[24,291,31,409];loading('補正画像を作成中…',45);await nextFrame();
   sourceDraw();await rectifyWithProgress();loading('測定画面を表示中…',99);await nextFrame();
@@ -261,10 +261,10 @@ $('start').addEventListener('click',async()=>{
   $('detect').disabled=false;$('reset').disabled=false;
   loading('読み込み完了',100);await new Promise(r=>setTimeout(r,300));
   $('detectInfo').textContent=(autoQuad?'画像の読み込み完了。黄色い外周を検出しました（要確認）。':'画像の読み込み完了。四隅の自動認識に失敗したため、青い点を手動調整してください。')+' 緑の印刷枠も調整してください。';
- }catch(err){ready=false;$('detect').disabled=!image;$('reset').disabled=!quad;loading('処理失敗：'+(err.message||'不明なエラー'),0);$('detectInfo').textContent='エラー：'+(err.message||'不明なエラー');$('selected').textContent='❌ '+(err.message||'処理に失敗しました')+'。カード全体が写った写真を使用してください。';}
+ }catch(err){ready=false;$('detect').disabled=false;$('reset').disabled=false;loading('処理失敗：'+(err.message||'不明なエラー'),0);$('detectInfo').textContent='エラー：'+(err.message||'不明なエラー');$('selected').textContent='❌ '+(err.message||'処理に失敗しました')+'。カード全体が写った写真を使用してください。';}
  finally{loaded();processing=false;$('file').disabled=false;$('start').disabled=!selectedFile;}
 });
-$('detect').onclick=async()=>{if(!image){$('detectInfo').textContent='まず画像を選択して測定開始してください';return;}cornerVerified=false;$('cornerConfirm').checked=false;try{const detected=detectQuad();if(!detected)throw Error('カードの外周を検出できません');quad=detected;initial=copy(quad);sourceDraw();rectify();$('reset').disabled=false;$('detectInfo').textContent='カードの輪郭を再検出しました。ただし同じ写真では同じ結果になる場合があります'}catch(e){$('detectInfo').textContent='再検出失敗：'+e.message}};$('reset').onclick=()=>{cornerVerified=false;$('cornerConfirm').checked=false;quad=copy(initial);sourceDraw();rectify();$('detectInfo').textContent='最後に検出したカードの四隅に戻しました'};
+$('detect').onclick=async()=>{if(!image){$('detectInfo').textContent='まず画像を選択して測定開始してください';return;}cornerVerified=false;$('cornerConfirm').checked=false;try{const detected=detectQuad();if(!detected)throw Error('カードの外周を検出できません');quad=detected;initial=copy(quad);sourceDraw();rectify();$('reset').disabled=false;$('detectInfo').textContent='カードの輪郭を再検出しました。ただし同じ写真では同じ結果になる場合があります'}catch(e){$('detectInfo').textContent='再検出失敗：'+e.message}};$('reset').onclick=()=>{if(!quad||!initial){$('detectInfo').textContent='まだ四隅がありません。先に測定を開始してください';return;}cornerVerified=false;$('cornerConfirm').checked=false;quad=copy(initial);sourceDraw();rectify();$('detectInfo').textContent='最後に検出したカードの四隅に戻しました'};
 $('cornerConfirm').addEventListener('change',e=>{cornerVerified=e.target.checked;render()});
 $('borderConfirm').addEventListener('change',e=>{borderVerified=e.target.checked;render()});
 ['side','guides','rulers'].forEach(id=>$(id).addEventListener('change',render));
