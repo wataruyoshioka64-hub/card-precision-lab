@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Card Precision Lab</title><style>
 *{box-sizing:border-box}body{background:#0c1515;color:#edf4f0;font:15px system-ui,sans-serif;margin:0 auto;max-width:1050px;padding:18px}h1{font-size:23px}h2{font-size:17px;margin:0 0 12px}.box{border:1px solid #36564d;background:#162622;border-radius:14px;padding:15px;margin:14px 0}button,select,input{font:inherit}button{background:#48cb96;color:#062318;border:0;padding:10px 14px;border-radius:8px;font-weight:700;margin:4px;cursor:pointer}button.alt{background:#344d44;color:white}button:disabled{opacity:.4}input[type=file]{max-width:100%}canvas{max-width:100%;height:auto;touch-action:none;display:block;margin:auto;background:#202c29}label{display:inline-block;margin:6px 10px 6px 0}.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px}.view{overflow:auto;background:#101b19;border-radius:8px;padding:6px}.small{font-size:12px;color:#b6c8c1;line-height:1.6}.stat{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.stat>div{background:#0b1915;padding:12px;border-radius:9px}.stat b{font-size:22px}.ok{color:#55e6a7}.warn{color:#ffb477}.err{color:#ff8b86}input[type=range]{width:180px}input[type=number]{width:74px;background:#243e34;border:1px solid #5a7d6b;border-radius:6px;padding:5px;color:white}#src{cursor:crosshair}#dst{cursor:crosshair}</style></head><body>
-<div id="tapCheck" style="position:sticky;top:0;z-index:999;background:#b92b2b;color:white;padding:10px;font-weight:bold">新URL版：読み込み確認中</div><h1>🃏 CARD PRECISION LAB <span style="font-size:12px;color:#a9c5b9">v20261112.21・外周輪郭優先</span></h1>
+<div id="tapCheck" style="position:sticky;top:0;z-index:999;background:#b92b2b;color:white;padding:10px;font-weight:bold">新URL版：読み込み確認中</div><h1>🃏 CARD PRECISION LAB <span style="font-size:12px;color:#a9c5b9">v20261112.22・印刷枠エッジ推定</span></h1>
 <div id="loading" role="status" aria-live="polite" style="display:none;position:sticky;top:8px;z-index:5;background:#fff0c4;color:#4c3100;padding:14px;border-radius:10px;font-weight:800;text-align:center">
 <div style="display:flex;align-items:center;justify-content:center;gap:10px"><span id="spinner" style="display:inline-block;width:23px;height:23px;border:3px solid #b9a66e;border-top-color:#4c3100;border-radius:50%;animation:spin .8s linear infinite"></span><span id="loadingText">画像を読み込み中…</span><strong id="percent">0%</strong></div>
 <div style="height:12px;background:#d7c8a3;border-radius:8px;margin-top:10px;overflow:hidden"><div id="progressFill" style="width:0%;height:100%;background:#3c8d67;transition:width .1s"></div></div></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style><div class="box"><h2>1. 画像読み込み・遠近補正</h2><input type="file" id="file" accept="image/*"><button id="start" disabled>▶ 画像を読み込んで測定開始</button><p id="selected" class="small">画像を選ぶと開始ボタンが押せます。</p><div id="previewWrap" style="display:none;border:1px solid #4f9b7c;border-radius:12px;padding:10px;margin:10px 0"><strong>✓ 画像選択完了・プレビュー</strong><img id="preview" alt="選択したカード画像" style="display:block;max-width:100%;max-height:300px;object-fit:contain;margin:8px auto"><div id="previewStatus" class="small"></div></div>
@@ -332,6 +332,38 @@ function updateConfidence(){
  out.textContent=score+'%（'+(score>=75?'高':score>=50?'中':'低')+'）';
  bar.style.width=score+'%';bar.style.background=score>=75?'#48cb96':score>=50?'#e4b45c':'#e27a70';
 }
+function estimateInnerBorderGeneric(){
+ // Printed-frame transition must be visible across many scan lines, not just one.
+ const p=dc.getImageData(0,0,W,H).data,gray=new Float32Array(W*H);
+ for(let i=0;i<W*H;i++){const k=i*4;gray[i]=.299*p[k]+.587*p[k+1]+.114*p[k+2]}
+ const scoreVertical=x=>{
+  let score=0,n=0;
+  for(let y=Math.round(H*.24);y<H*.76;y+=4){
+   const a=gray[y*W+x-2],b=gray[y*W+x+2];
+   const diff=Math.abs(b-a);
+   if(diff>15)score+=Math.min(70,diff);
+   n++;
+  }
+  return score/Math.max(1,n);
+ };
+ const scoreHorizontal=y=>{
+  let score=0,n=0;
+  for(let x=Math.round(W*.24);x<W*.76;x+=4){
+   const diff=Math.abs(gray[(y-2)*W+x]-gray[(y+2)*W+x]);
+   if(diff>15)score+=Math.min(70,diff);
+   n++;
+  }
+  return score/Math.max(1,n);
+ };
+ function peak(from,to,score){let best=null,max=0;
+  for(let x=from;x<=to;x++){const s=score(x);if(s>max){max=s;best=x}}
+  return max>=12?best:null;
+ }
+ const l=peak(7,Math.round(W*.18),scoreVertical),r=peak(Math.round(W*.82),W-8,scoreVertical);
+ const t=peak(7,Math.round(H*.17),scoreHorizontal),b=peak(Math.round(H*.83),H-8,scoreHorizontal);
+ if([l,r,t,b].some(v=>v===null))return null;
+ return[l,r,t,b];
+}
 function estimateInnerBorder(){
  // Scan yellow-to-blue transitions on rectified card back; estimate only.
  const p=dc.getImageData(0,0,W,H).data;
@@ -346,9 +378,9 @@ function estimateInnerBorder(){
   for(let y=4;y<H*.17;y++)if(isBlue(x,y)&&isBlue(x,y+2)){top.push(y);break}
   for(let y=H-5;y>H*.83;y--)if(isBlue(x,y)&&isBlue(x,y-2)){bottom.push(y);break}
  }
- if(Math.min(left.length,right.length,top.length,bottom.length)<5)return null;
+ if(Math.min(left.length,right.length,top.length,bottom.length)<5)return estimateInnerBorderGeneric();
  const e=[median(left),median(right),median(top),median(bottom)];
- if(e[0]<2||e[1]>W-3||e[2]<2||e[3]>H-3||e[0]>=e[1]||e[2]>=e[3])return null;
+ if(e[0]<2||e[1]>W-3||e[2]<2||e[3]>H-3||e[0]>=e[1]||e[2]>=e[3])return estimateInnerBorderGeneric();
  return e;
 }
 function drawRedContours(){
