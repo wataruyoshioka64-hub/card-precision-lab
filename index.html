@@ -1,10 +1,10 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Card Precision Lab</title><style>
 *{box-sizing:border-box}body{background:#0c1515;color:#edf4f0;font:15px system-ui,sans-serif;margin:0 auto;max-width:1050px;padding:18px}h1{font-size:23px}h2{font-size:17px;margin:0 0 12px}.box{border:1px solid #36564d;background:#162622;border-radius:14px;padding:15px;margin:14px 0}button,select,input{font:inherit}button{background:#48cb96;color:#062318;border:0;padding:10px 14px;border-radius:8px;font-weight:700;margin:4px;cursor:pointer}button.alt{background:#344d44;color:white}button:disabled{opacity:.4}input[type=file]{max-width:100%}canvas{max-width:100%;height:auto;touch-action:none;display:block;margin:auto;background:#202c29}label{display:inline-block;margin:6px 10px 6px 0}.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px}.view{overflow:auto;background:#101b19;border-radius:8px;padding:6px}.small{font-size:12px;color:#b6c8c1;line-height:1.6}.stat{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.stat>div{background:#0b1915;padding:12px;border-radius:9px}.stat b{font-size:22px}.ok{color:#55e6a7}.warn{color:#ffb477}.err{color:#ff8b86}input[type=range]{width:180px}input[type=number]{width:74px;background:#243e34;border:1px solid #5a7d6b;border-radius:6px;padding:5px;color:white}#src{cursor:crosshair}#dst{cursor:crosshair}</style></head><body>
-<h1>🃏 CARD PRECISION LAB <span style="font-size:12px;color:#a9c5b9">v20261112.23・OpenCV実装</span></h1>
+<h1>🃏 CARD PRECISION LAB <span style="font-size:12px;color:#a9c5b9">v20261112.24・AIモデル統合</span></h1>
 <div id="loading" role="status" aria-live="polite" style="display:none;position:sticky;top:8px;z-index:5;background:#fff0c4;color:#4c3100;padding:14px;border-radius:10px;font-weight:800;text-align:center">
 <div style="display:flex;align-items:center;justify-content:center;gap:10px"><span id="spinner" style="display:inline-block;width:23px;height:23px;border:3px solid #b9a66e;border-top-color:#4c3100;border-radius:50%;animation:spin .8s linear infinite"></span><span id="loadingText">画像を読み込み中…</span><strong id="percent">0%</strong></div>
 <div style="height:12px;background:#d7c8a3;border-radius:8px;margin-top:10px;overflow:hidden"><div id="progressFill" style="width:0%;height:100%;background:#3c8d67;transition:width .1s"></div></div></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style><div class="box"><h2>1. 画像読み込み・遠近補正</h2><input type="file" id="file" accept="image/*"><button id="start" disabled>▶ 画像を読み込んで測定開始</button><p id="selected" class="small">画像を選ぶと開始ボタンが押せます。</p><div id="previewWrap" style="display:none;border:1px solid #4f9b7c;border-radius:12px;padding:10px;margin:10px 0"><strong>✓ 画像選択完了・プレビュー</strong><img id="preview" alt="選択したカード画像" style="display:block;max-width:100%;max-height:300px;object-fit:contain;margin:8px auto"><div id="previewStatus" class="small"></div></div>
-<p class="small">写真は外部送信しません。画像認識は端末内で行います。OpenCV.jsのプログラムを外部から読み込み、失敗時は内蔵方式に切り替えます。カードの四隅を自動推定しますが、必ず位置を確認してください。左画像の青い丸をドラッグして四隅を調整できます。</p>
+<p class="small">写真は外部送信しません。画像認識は端末内で行います。AIモデル（ORMBG）とOpenCV.jsを外部から読み込み、端末内で処理します。初回は数十MBのダウンロードが必要です。失敗時は従来方式に切り替えます。カードの四隅を自動推定しますが、必ず位置を確認してください。左画像の青い丸をドラッグして四隅を調整できます。</p>
 <button id="detect" type="button" onclick="document.getElementById(&quot;detectInfo&quot;).textContent=&quot;再検出をタップしました。処理を開始します…&quot;;if(window.cardDetectAction){window.cardDetectAction()}else{document.getElementById(&quot;detectInfo&quot;).textContent=&quot;エラー：認識プログラムが起動していません。ページを再読み込みしてください&quot;}">四隅を再検出</button><button id="reset" type="button" class="alt" onclick="document.getElementById(&quot;detectInfo&quot;).textContent=&quot;初期化をタップしました…&quot;;if(window.cardResetAction){window.cardResetAction()}else{document.getElementById(&quot;detectInfo&quot;).textContent=&quot;エラー：認識プログラムが起動していません&quot;}">四隅を初期化</button><span id="resetStatus" role="status" style="display:inline-block;margin:6px;color:#ffcf41;font-weight:700"></span>
 <div class="cols"><div><h2>元画像・四隅の検出</h2><div class="view"><canvas id="src" width="320" height="300"></canvas></div></div><div><h2>遠近補正・カードのみ</h2><div class="view"><canvas id="dst" width="315" height="440"></canvas></div></div></div><div id="confidenceBox" style="margin:12px 0;padding:12px;border:1px solid #58756a;border-radius:9px"><strong>四隅の自動認識信頼度：<span id="confidenceValue">未測定</span></strong><div style="height:10px;background:#35443e;border-radius:6px;overflow:hidden;margin-top:8px"><div id="confidenceBar" style="width:0%;height:100%;background:#48cb96"></div></div><p class="small" style="margin-bottom:0">輪郭の明瞭さ・四角形の形状から推定した信頼度です。実際の正解率や測定精度を保証する数値ではありません。</p></div><p id="detectInfo" class="small">画像を選択してください。</p>
 <label><input type="checkbox" id="cornerConfirm"> 四隅がカードの実際の外周と一致することを拡大確認した</label></div>
@@ -300,6 +300,41 @@ function detectQuadColor(){
  if(corners.some(p=>p.x<minX-tolerance||p.x>maxX+tolerance||p.y<minY-tolerance||p.y>maxY+tolerance))return null;
  return corners.map(p=>({x:p.x/scale,y:p.y/scale}));
 }
+let aiPipePromise=null;
+async function loadAIModel(){
+ if(!aiPipePromise)aiPipePromise=(async()=>{
+  const lib=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1');
+  return await lib.pipeline('background-removal','onnx-community/ormbg-ONNX',{device:'wasm',dtype:'uint8'});
+ })().catch(e=>{aiPipePromise=null;throw e});
+ return aiPipePromise;
+}
+async function detectQuadAI(){
+ const model=await loadAIModel();
+ const c=document.createElement('canvas'),scale=Math.min(1,640/Math.max(image.width,image.height));
+ c.width=Math.round(image.width*scale);c.height=Math.round(image.height*scale);
+ c.getContext('2d').drawImage(image,0,0,c.width,c.height);
+ const result=await model(c.toDataURL('image/png'));
+ const output=Array.isArray(result)?result[0]:result;
+ if(!output||!output.data||!output.width||!output.height)throw Error('AIマスクの形式を認識できません');
+ const w=output.width,h=output.height,data=output.data,channels=data.length/(w*h);
+ if(channels!==4)throw Error('AIマスクに透明度がありません');
+ const mask=new Uint8Array(w*h);
+ let count=0;
+ for(let i=0;i<w*h;i++)if(data[i*4+3]>145){mask[i]=1;count++}
+ if(count<w*h*.06||count>w*h*.96)throw Error('AIがカードを分離できません');
+ const corners=[null,null,null,null],ext=[Infinity,-Infinity,-Infinity,Infinity];
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(mask[y*w+x]){
+  const a=x+y,b=x-y;
+  if(a<ext[0]){ext[0]=a;corners[0]={x,y}}
+  if(b>ext[1]){ext[1]=b;corners[1]={x,y}}
+  if(a>ext[2]){ext[2]=a;corners[2]={x,y}}
+  if(b<ext[3]){ext[3]=b;corners[3]={x,y}}
+ }
+ if(corners.some(x=>!x))throw Error('AIで四隅を確定できません');
+ const area=Math.abs(corners.reduce((a,p,i)=>a+p.x*corners[(i+1)%4].y-corners[(i+1)%4].x*p.y,0))/2;
+ if(area<w*h*.07)throw Error('AI輪郭が小さすぎます');
+ return corners.map(p=>({x:p.x*image.width/w,y:p.y*image.height/h}));
+}
 let cvReadyPromise=null;
 function loadOpenCV(){
  if(window.cv&&typeof cv.Mat==='function')return Promise.resolve(true);
@@ -364,9 +399,10 @@ function detectQuadOpenCV(){
  finally{for(let i=allocated.length-1;i>=0;i--)try{allocated[i].delete()}catch(e){}}
 }
 async function detectQuadAdvanced(){
+ try{const quad=await detectQuadAI();if(quad)return {quad,engine:"AIモデル ORMBG（端末内推論）"}}catch(e){console.warn("AI detector fallback",e);window.lastAIError=String(e.message||e)}
  const available=await loadOpenCV();
  const result=available?detectQuadOpenCV():null;
- return {quad:result||detectQuad(),engine:result?'OpenCV輪郭検出':available?'従来方式（OpenCV候補なし）':'従来方式（OpenCV読み込み不可）'};
+ return {quad:result||detectQuad(),engine:result?'OpenCV輪郭検出（AI不可：'+(window.lastAIError||'不明')+'）':available?'従来方式（AI不可：'+(window.lastAIError||'不明')+'）':'従来方式（AI/OpenCV不可：'+(window.lastAIError||'不明')+'）'};
 }
 function detectQuad(){return detectQuadBoundary()||detectQuadEdges()||detectQuadColor()}
 function updateConfidence(){
