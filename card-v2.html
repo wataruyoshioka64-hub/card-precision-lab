@@ -72,6 +72,26 @@ label:has(#cornerConfirm:checked),label:has(#borderConfirm:checked){background:#
 <div class="cols"><div><div class="view"><canvas id="measure" width="315" height="440"></canvas></div></div><div><h2>測定結果</h2><div class="stat"><div>左右<br><b id="lr">—</b><div id="lrmm" class="small"></div></div><div>上下<br><b id="tb">—</b><div id="tbmm" class="small"></div></div><div>中心差<br><b id="offset">—</b><div id="offsetxy" class="small"></div></div><div>ランク<br><b id="rank">—</b><div class="small">S ≤ 51.00 / A ≤ 54.00 / B ＞ 54.00</div></div></div><p id="verdict"></p><button id="export" disabled>画像を保存・共有</button><div id="saveStatus" role="status" class="small" style="margin:6px;color:#ffcf41"></div><button id="report" disabled class="alt">数値をCSV保存</button></div></div>
 <details class="small"><summary>測定精度について</summary><p>mmはカード寸法63×88mmからの推定値です。撮影角度、レンズ歪み、裁断差などで誤差が生じます。鑑定結果を保証するものではありません。</p></details></div>
 <script>
+(function(){
+ var file=document.getElementById('file'),start=document.getElementById('start'),status=document.getElementById('selected');
+ if(!file||!start||!status)return;
+ function refresh(){
+  var f=file.files&&file.files[0];
+  start.disabled=!f;
+  status.textContent=f?'画像選択完了：'+f.name+'（鑑定スタートを押してください）':'画像を選ぶと開始ボタンが押せます。';
+  start.dataset.fileReady=f?'yes':'no';
+ }
+ file.addEventListener('change',refresh);
+ file.addEventListener('input',refresh);
+ window.addEventListener('pageshow',refresh);
+ window.addEventListener('error',function(e){
+  if(start.dataset.fileReady==='yes')start.disabled=false;
+  var n=document.getElementById('detectInfo');
+  if(n)n.textContent='起動エラー：'+(e.message||'不明')+'（行 '+(e.lineno||'?')+'）。この表示を教えてください。';
+ });
+ refresh();
+})();
+</script><script>
 'use strict';
 document.getElementById('tapCheck').textContent='新URL版：プログラム起動済み';
 const $=id=>document.getElementById(id), src=$('src'), dst=$('dst'), meas=$('measure'), sc=src.getContext('2d'), dc=dst.getContext('2d',{willReadFrequently:true}),mc=meas.getContext('2d');
@@ -1190,7 +1210,7 @@ document.querySelectorAll('[data-corner]').forEach(b=>b.addEventListener('click'
 chooseCorner(0);
 trainingStatus();
 
-let selectedFile=null,processing=false,previewURL=null;
+let selectedFile=$('file').files&&$('file').files[0]||null,processing=false,previewURL=null;
 $('file').addEventListener('change',e=>{
  selectedFile=e.target.files&&e.target.files[0]||null;
  $('start').disabled=!selectedFile||processing;
@@ -1217,7 +1237,7 @@ function readFileWithProgress(f){return new Promise((resolve,reject)=>{
  reader.readAsDataURL(f);
 })}
 $('start').addEventListener('click',async()=>{
- const f=selectedFile;if(!f||processing)return;
+ const f=selectedFile||($('file').files&&$('file').files[0]);if(!f||processing){$('selected').textContent=!f?'画像が選択されていません。もう一度選択してください。':'処理中です。';return}
  processing=true;$('start').disabled=true;$('file').disabled=true;
  ready=false;innerEstimated=false;cornerVerified=false;borderVerified=false;$('cornerConfirm').checked=false;$('borderConfirm').checked=false;
  $('detect').disabled=false;$('reset').disabled=false;$('export').disabled=true;$('report').disabled=true;
