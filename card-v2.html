@@ -1072,38 +1072,6 @@ function moveSelectedCorner(direction){
 document.querySelectorAll('[data-move]').forEach(b=>b.addEventListener('click',()=>moveSelectedCorner(b.dataset.move)));
 
 
-let perspectiveHistory=[],perspectiveBase=null;
-function adjustPerspective(mode){
- if(!image||!quad){$('perspectiveStatus').textContent='先にカードを読み込んで測定してください。';return}
- const prev=copy(quad),c={x:quad.reduce((v,p)=>v+p.x,0)/4,y:quad.reduce((v,p)=>v+p.y,0)/4};
- const width=(dist(quad[0],quad[1])+dist(quad[3],quad[2]))/2;
- const height=(dist(quad[0],quad[3])+dist(quad[1],quad[2]))/2;
- const step=Number($('perspectiveStep').value)||1;
- const q=copy(quad);
- if(mode==='rotateLeft'||mode==='rotateRight'){
-  const angle=(mode==='rotateLeft'?-1:1)*step*Math.PI/180;
-  for(const p of q){const x=p.x-c.x,y=p.y-c.y;p.x=c.x+x*Math.cos(angle)-y*Math.sin(angle);p.y=c.y+x*Math.sin(angle)+y*Math.cos(angle)}
- }else{
-  const amount=step*.004;
-  // Narrow the selected side, preserving its center; opposite side remains unchanged.
-  const side={topNarrow:[0,1],bottomNarrow:[2,3],leftNarrow:[0,3],rightNarrow:[1,2]}[mode];
-  if(!side)return;
-  const [i,j]=side,dx=q[j].x-q[i].x,dy=q[j].y-q[i].y;
-  q[i].x+=dx*amount;q[i].y+=dy*amount;q[j].x-=dx*amount;q[j].y-=dy*amount;
- }
- if(q.some(p=>p.x<0||p.y<0||p.x>=image.width||p.y>=image.height)||perspectiveQuadQuality(q)<-50){
-  $('perspectiveStatus').textContent='画像の範囲外、または四隅が交差するため補正できません。';return
- }
- if(!perspectiveBase)perspectiveBase=copy(quad);
- perspectiveHistory.push(prev);if(perspectiveHistory.length>80)perspectiveHistory.shift();
- quad=q;cornerVerified=false;$('cornerConfirm').checked=false;
- try{rectify();sourceDraw();syncCornerSliders();$('perspectiveStatus').textContent='補正を適用しました（'+perspectiveHistory.length+'回）。画像を確認してください。'}catch(e){quad=prev;sourceDraw();$('perspectiveStatus').textContent='補正エラー：'+e.message}
-}
-document.querySelectorAll('[data-perspective]').forEach(b=>b.addEventListener('click',()=>adjustPerspective(b.dataset.perspective)));
-$('perspectiveUndo').addEventListener('click',()=>{if(!perspectiveHistory.length){$('perspectiveStatus').textContent='戻せる補正はありません。';return}quad=perspectiveHistory.pop();rectify();sourceDraw();syncCornerSliders();$('perspectiveStatus').textContent='1つ前の補正に戻しました。'});
-$('perspectiveReset').addEventListener('click',()=>{if(!perspectiveBase){$('perspectiveStatus').textContent='補正前の位置はありません。';return}quad=copy(perspectiveBase);perspectiveBase=null;perspectiveHistory=[];rectify();sourceDraw();syncCornerSliders();$('perspectiveStatus').textContent='補正前の位置に戻しました。'});
-
-
 let touch3DX=0,touch3DY=0,touch3DPointer=null;
 function updateTouch3DPreview(){
  const c=$('touch3DCanvas'),ctx=c.getContext('2d');
