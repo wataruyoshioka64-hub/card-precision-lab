@@ -1034,9 +1034,9 @@ function applyTraining(q){
 function beginTrainingCorrection(){
  if(!image||!quad){trainingStatus('先に四隅を検出してください。');return}
  trainingBase=copy(quad);editCorners=true;
- $('trainEdit').textContent='修正中：青い点をドラッグ';
+ $('trainEdit').textContent='四隅を修正中';
  $('trainSave').disabled=false;
- $('detectInfo').textContent='青い点を指でドラッグして外側の四隅に合わせてください。青い点を直接触っても修正モードが始まります。';
+ $('detectInfo').textContent='外側の角を選び、拡大画面や十字キーで位置を調整してください。';
  trainingStatus('修正モード開始');
 }
 function saveTrainingCorrection(){
