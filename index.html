@@ -1109,6 +1109,7 @@ $('confirmSelectedCorner').addEventListener('click',()=>{
  if(lockedCorners.slice(0,4).every(Boolean)){
   $('cornerConfirm').checked=true;cornerVerified=true;
   if(trainingBase&&editCorners)saveTrainingCorrection();
+  cornerVerified=true;$('cornerConfirm').checked=true;
   trainingStatus('外側4点を固定しました。補正データはこの端末の学習記録に保存されます（クラウドAIの学習ではありません）。');
  }else trainingStatus('角'+(selectedCorner+1)+'を固定しました。残りの外側の角も決定してください。');
 });
